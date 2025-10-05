@@ -1,0 +1,94 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../features/auth/data/auth_providers.dart';
+import '../../features/auth/domain/auth_user.dart';
+import '../auth/presentation/login_screen.dart';
+
+class ProfileScreen extends ConsumerWidget {
+  const ProfileScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userAsync = ref.watch(authUserProvider);
+
+    return userAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Greška: $e')),
+      data: (user) {
+        if (user == null) {
+          return _LoggedOutView(onLogin: () async {
+            final ok = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(builder: (_) => const LoginScreen()),
+            );
+            if (ok == true && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Dobrodošao natrag!')),
+              );
+            }
+          });
+        }
+        return _LoggedInView(user: user);
+      },
+    );
+  }
+}
+
+class _LoggedOutView extends StatelessWidget {
+  final VoidCallback onLogin;
+  const _LoggedOutView({required this.onLogin});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.person_outline, size: 64),
+            const SizedBox(height: 12),
+            const Text('Nisi prijavljen', style: TextStyle(fontSize: 18)),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: onLogin,
+              icon: const Icon(Icons.login),
+              label: const Text('Prijavi se'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoggedInView extends ConsumerWidget {
+  final AuthUser user;
+  const _LoggedInView({required this.user});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        ListTile(
+          leading: const CircleAvatar(child: Icon(Icons.person)),
+          title: Text(user.email),
+          subtitle: Text('Uloga: ${user.role}'),
+        ),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.logout),
+          title: const Text('Odjava'),
+          onTap: () async {
+            await ref.read(authActionsProvider).signOut();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Odjavljen')),
+              );
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
