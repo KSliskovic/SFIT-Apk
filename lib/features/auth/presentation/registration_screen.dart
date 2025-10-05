@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/auth_providers.dart';
+
+import '../application/auth_controller.dart';
+import 'package:sumfit/core/forms/validators.dart';
+import 'package:sumfit/core/ui/notify.dart';
 
 class RegistrationScreen extends ConsumerStatefulWidget {
   const RegistrationScreen({super.key});
@@ -15,11 +18,14 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _indexNo = TextEditingController();
-  final _orgCode = TextEditingController();
+  final _organizerCode = TextEditingController();
 
-  String _role = 'student';
+  String _role = 'student'; // 'student' | 'organizer'
   String? _faculty;
-  final _faculties = const ['FPMOZ', 'FSRE', 'EF', 'FF'];
+
+  final List<String> _faculties = const [
+    'ETF', 'PMF', 'FF', 'EF', 'FESB', 'FER', 'TVZ', 'Algebra'
+  ];
 
   @override
   void dispose() {
@@ -27,36 +33,39 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
     _email.dispose();
     _password.dispose();
     _indexNo.dispose();
-    _orgCode.dispose();
+    _organizerCode.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    final actions = ref.read(authActionsProvider);
-    try {
-      await actions.register(
-        name: _name.text.trim(),
-        email: _email.text.trim(),
-        password: _password.text,
-        role: _role,
-        faculty: _faculty,
-        indexNo: _indexNo.text.trim().isEmpty ? null : _indexNo.text.trim(),
-        organizerCode: _role == 'organizer' ? _orgCode.text.trim() : null,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pop(true); // vrati na login/profil caller
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registracija uspješna')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-    }
+
+    final ctrl = ref.read(authControllerProvider.notifier);
+    final res = await ctrl.register(
+      name: _name.text.trim(),
+      email: _email.text.trim(),
+      password: _password.text,
+      role: _role,
+      faculty: _role == 'student' ? _faculty : null,
+      indexNo: _role == 'student' ? _indexNo.text.trim() : null,
+      organizerCode: _role == 'organizer' ? _organizerCode.text.trim() : null,
+    );
+
+    if (!mounted) return;
+    res.fold(
+      (f) => showError(context, f.message),
+      (_) {
+        showSuccess(context, 'Registracija uspješna');
+        Navigator.of(context).pop(); // nazad na login
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authControllerProvider);
+    final isLoading = authState.isLoading;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Registracija')),
       body: Form(
@@ -70,7 +79,8 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                 labelText: 'Ime i prezime',
                 border: OutlineInputBorder(),
               ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Obavezno' : null,
+              validator: (v) => requireText(v, label: 'Ime i prezime'),
+              enabled: !isLoading,
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -80,11 +90,8 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.emailAddress,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Obavezno';
-                if (!v.contains('@')) return 'Neispravan email';
-                return null;
-              },
+              validator: (v) => requireEmail(v),
+              enabled: !isLoading,
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -94,66 +101,65 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                 border: OutlineInputBorder(),
               ),
               obscureText: true,
-              validator: (v) {
-                if (v == null || v.isEmpty) return 'Obavezno';
-                if (v.length < 4) return 'Min 4 znaka (demo)';
-                return null;
-              },
+              validator: (v) => minLength(v, 6, label: 'Lozinka'),
+              enabled: !isLoading,
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               decoration: const InputDecoration(
-                labelText: 'Fakultet',
+                labelText: 'Uloga',
                 border: OutlineInputBorder(),
               ),
-              value: _faculty,
-              items: _faculties
-                  .map((f) => DropdownMenuItem<String>(value: f, child: Text(f)))
-                  .toList(),
-              onChanged: (v) => setState(() => _faculty = v),
-              validator: (v) => (v == null || v.isEmpty) ? 'Odaberi fakultet' : null,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _indexNo,
-              decoration: const InputDecoration(
-                labelText: 'Broj indexa (npr. 14488)',
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: 12),
-            const Text('Uloga'),
-            const SizedBox(height: 6),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'student', label: Text('Student')),
-                ButtonSegment(value: 'organizer', label: Text('Organizator')),
+              value: _role,
+              items: const [
+                DropdownMenuItem(value: 'student', child: Text('Student')),
+                DropdownMenuItem(value: 'organizer', child: Text('Organizator')),
               ],
-              selected: {_role},
-              onSelectionChanged: (s) => setState(() => _role = s.first),
+              onChanged: isLoading ? null : (v) => setState(() => _role = v ?? 'student'),
             ),
-            if (_role == 'organizer') ...[
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _orgCode,
+            const SizedBox(height: 12),
+
+            if (_role == 'student') ...[
+              DropdownButtonFormField<String>(
                 decoration: const InputDecoration(
-                  labelText: 'Organizatorski kod',
+                  labelText: 'Fakultet',
                   border: OutlineInputBorder(),
                 ),
-                obscureText: true,
-                validator: (v) {
-                  if (_role != 'organizer') return null;
-                  if (v == null || v.isEmpty) return 'Unesi kod';
-                  return null;
-                },
+                value: _faculty,
+                items: _faculties.map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
+                onChanged: isLoading ? null : (v) => setState(() => _faculty = v),
+                validator: (v) => (v == null || v.isEmpty) ? 'Odaberi fakultet' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _indexNo,
+                decoration: const InputDecoration(
+                  labelText: 'Broj indeksa',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) => requireText(v, label: 'Broj indeksa'),
+                enabled: !isLoading,
               ),
             ],
-            const SizedBox(height: 24),
+
+            if (_role == 'organizer') ...[
+              TextFormField(
+                controller: _organizerCode,
+                decoration: const InputDecoration(
+                  labelText: 'Organizer kod (ako je potreban)',
+                  border: OutlineInputBorder(),
+                ),
+                enabled: !isLoading,
+              ),
+            ],
+
+            const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: _submit,
-              icon: const Icon(Icons.person_add),
-              label: const Text('Registriraj se'),
+              onPressed: isLoading ? null : _submit,
+              icon: isLoading
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.app_registration),
+              label: Text(isLoading ? 'Spremanje…' : 'Registriraj se'),
             ),
           ],
         ),

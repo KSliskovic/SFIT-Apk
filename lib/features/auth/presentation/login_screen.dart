@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../application/auth_controller.dart';
 import '../data/auth_providers.dart';
 import 'registration_screen.dart';
+
+import 'package:sumfit/core/forms/validators.dart';
+import 'package:sumfit/core/ui/notify.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -24,15 +29,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    final actions = ref.read(authActionsProvider);
-    try {
-      await actions.login(email: _email.text.trim(), password: _password.text);
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-    }
+
+    final ctrl = ref.read(authControllerProvider.notifier);
+    final res = await ctrl.login(
+      email: _email.text.trim(),
+      password: _password.text,
+    );
+
+    if (!mounted) return;
+    res.fold(
+      (f) => showError(context, f.message),
+      (_) {
+        showSuccess(context, 'Dobrodošao!');
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop(); // vrati na AuthGate/home
+        } else {
+          // Fallback: ako nema ništa za pop, zamijeni ekran profilom
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const ProfileScreen()),
+          );
+        }
+      },
+    );
   }
 
   void _goRegister() {
@@ -43,6 +61,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authControllerProvider);
+    final isLoading = authState.isLoading;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Prijava')),
       body: Form(
@@ -57,11 +78,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.emailAddress,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Unesi email';
-                if (!v.contains('@')) return 'Neispravan email';
-                return null;
-              },
+              validator: (v) => requireEmail(v),
+              enabled: !isLoading,
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -71,26 +89,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 border: OutlineInputBorder(),
               ),
               obscureText: true,
-              validator: (v) {
-                if (v == null || v.isEmpty) return 'Unesi lozinku';
-                if (v.length < 4) return 'Min 4 znaka (demo)';
-                return null;
-              },
+              validator: (v) => minLength(v, 6, label: 'Lozinka'),
+              enabled: !isLoading,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: _submit,
-              icon: const Icon(Icons.login),
-              label: const Text('Prijavi se'),
+              onPressed: isLoading ? null : _submit,
+              icon: isLoading
+                  ? const SizedBox(
+                      width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.login),
+              label: Text(isLoading ? 'Prijava…' : 'Prijavi se'),
             ),
             const SizedBox(height: 16),
             TextButton(
-              onPressed: _goRegister,
-              child: const Text("Nemate korisnički račun? Registrirajte se"),
+              onPressed: isLoading ? null : _goRegister,
+              child: const Text('Nemate korisnički račun? Registrirajte se'),
             ),
           ],
         ),
       ),
     );
+  }
+}
+
+class ProfileScreen extends StatelessWidget {
+  const ProfileScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    // Ovo je placeholder; u tvom projektu već postoji prava ProfileScreen
+    return const Scaffold(body: Center(child: Text('Profil')));
   }
 }

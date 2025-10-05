@@ -2,33 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../data/results_providers.dart';
-import '../data/results_repository.dart';
-import '../domain/models.dart';
-
 // Events
 import '../../events/data/events_providers.dart';
+import '../../events/domain/event.dart';
 
-// Disciplines
-import '../../disciplines/data/discipline_providers.dart';
-import '../../disciplines/presentation/manage_disciplines_screen.dart';
+// Results (repo/provideri i add screen)
+import '../data/results_providers.dart'; // teamsStreamProvider / playersStreamProvider
+import '../domain/models.dart';
+import 'add_result_screen.dart';
+import 'manage_roster_guard.dart';
+import 'roster_list_screen.dart';
+import 'standings_screen.dart';
 
-// Auth (za provjeru role)
-import '../../auth/data/auth_providers.dart';
+// Discipline (centralni izvor)
+import '../data/disciplines.dart';
 
-DateTime? _extractEventDate(dynamic e) {
-  try { final d = e.date; if (d is DateTime) return d; } catch (_) {}
-  try { final d = e.dateTime; if (d is DateTime) return d; } catch (_) {}
-  try { final d = e.start; if (d is DateTime) return d; } catch (_) {}
-  try { final d = e.when; if (d is DateTime) return d; } catch (_) {}
-  return null;
-}
+// Shared standings provideri — alias da izbjegnemo sudar imena
+import '../data/standings_providers.dart' as standings;
 
-String _extractEventName(dynamic e) {
-  try { final n = e.name; if (n is String && n.trim().isNotEmpty) return n; } catch (_) {}
-  try { final n = e.title; if (n is String && n.trim().isNotEmpty) return n; } catch (_) {}
-  return 'Event';
-}
+// Permissions (role-based)
+import '../../../core/auth/permissions.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({super.key});
@@ -37,728 +30,430 @@ class ResultsScreen extends ConsumerStatefulWidget {
   ConsumerState<ResultsScreen> createState() => _ResultsScreenState();
 }
 
-class _ResultsScreenState extends ConsumerState<ResultsScreen> with TickerProviderStateMixin {
-  late TabController _tab;
+class _ResultsScreenState extends ConsumerState<ResultsScreen> {
+  String? _eventId;
+  String? _discipline; // 'Sve' ili konkretna
+  bool _isTeam = false; // false = individualni, true = timski
 
-  String? _teamDiscipline;
-  String? _indivDiscipline;
-
-  DateTime? _teamEventDate;
-  DateTime? _indivEventDate;
-
-  final _df = DateFormat('EEE, d. MMM yyyy');
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this)..addListener(() => setState(() {}));
+    _searchCtrl.addListener(() {
+      final q = _searchCtrl.text.trim();
+      if (q != _query) setState(() => _query = q);
+    });
   }
 
   @override
   void dispose() {
-    _tab.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // provjeri je li user organizer
-    final userAsync = ref.watch(authUserProvider);
-    final isOrganizer = userAsync.asData?.value?.role == 'organizer';
-
-    final repo = ref.watch(resultsRepositoryProvider);
-    final teamDisc = ref.watch(teamDisciplinesProvider);
-    final indivDisc = ref.watch(individualDisciplinesProvider);
-
-    _teamDiscipline ??= (teamDisc.isNotEmpty ? teamDisc.first.name : null);
-    _indivDiscipline ??= (indivDisc.isNotEmpty ? indivDisc.first.name : null);
+    final eventsAsync = ref.watch(eventsStreamProvider);
+    final allDisciplines = ref.watch(allDisciplinesWithAllProvider);
+    final canEdit = ref.watch(canEditProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Rezultati'),
         actions: [
-          if (isOrganizer)
+          if (canEdit)
             IconButton(
-              tooltip: 'Upravljaj disciplinama',
+              tooltip: 'Vidi timove',
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ManageDisciplinesScreen()),
+                  MaterialPageRoute(builder: (_) => const RosterListScreen(showTeams: true)),
                 );
               },
-              icon: const Icon(Icons.tune),
+              icon: const Icon(Icons.groups_2),
+            ),
+          if (canEdit)
+            IconButton(
+              tooltip: 'Vidi članove',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RosterListScreen(showTeams: false)),
+                );
+              },
+              icon: const Icon(Icons.people_alt),
+            ),
+          if (canEdit)
+            IconButton(
+              tooltip: 'Dodaj tim/igrača',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ManageRosterGuard()),
+                );
+              },
+              icon: const Icon(Icons.group_add),
             ),
         ],
-        bottom: TabBar(
-          controller: _tab,
-          tabs: const [
-            Tab(text: 'Timski sportovi'),
-            Tab(text: 'Samostalni'),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tab,
-        children: [
-          _TeamTab(
-            discipline: _teamDiscipline,
-            onChangeDiscipline: (d) => setState(() => _teamDiscipline = d),
-            selectedDate: _teamEventDate,
-            onChangeDate: (d) => setState(() => _teamEventDate = d),
-            df: _df,
-          ),
-          _IndividualTab(
-            discipline: _indivDiscipline,
-            onChangeDiscipline: (d) => setState(() => _indivDiscipline = d),
-            selectedDate: _indivEventDate,
-            onChangeDate: (d) => setState(() => _indivEventDate = d),
-            df: _df,
-          ),
-        ],
-      ),
-      // FAB je samo za organizatora
-      floatingActionButton: !isOrganizer
-          ? null
-          : (_tab.index == 0
-              ? _TeamFab(repo: repo, discipline: _teamDiscipline ?? '', selectedDate: _teamEventDate)
-              : _IndividualFab(repo: repo, discipline: _indivDiscipline ?? '', selectedDate: _indivEventDate)),
-    );
-  }
-}
-
-class _EventDateFilter extends ConsumerWidget {
-  final DateTime? selected;
-  final ValueChanged<DateTime?> onChanged;
-  final DateFormat df;
-  final String hint;
-
-  const _EventDateFilter({
-    required this.selected,
-    required this.onChanged,
-    required this.df,
-    required this.hint,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final eventsAsync = ref.watch(eventsStreamProvider);
-    return eventsAsync.when(
-      loading: () => const SizedBox(height: 56, child: Center(child: CircularProgressIndicator())),
-      error: (e, _) => Text('Greška s eventima: $e'),
-      data: (events) {
-        final byDay = <String, DateTime>{};
-        final namesByDay = <String, Set<String>>{};
-        for (final e in events) {
-          final d = _extractEventDate(e);
-          if (d == null) continue;
-          final day = DateTime(d.year, d.month, d.day);
-          final key = DateFormat('yyyy-MM-dd').format(day);
-
-          byDay[key] = day;
-          namesByDay.putIfAbsent(key, () => <String>{}).add(_extractEventName(e));
-        }
-
-        final days = byDay.values.toList()..sort((a, b) => a.compareTo(b));
-
-        final items = <DropdownMenuItem<DateTime?>>[
-          const DropdownMenuItem<DateTime?>(value: null, child: Text('Svi datumi')),
-          ...days.map((d) {
-            final key = DateFormat('yyyy-MM-dd').format(d);
-            final names = (namesByDay[key] ?? const <String>{}).toList()..sort();
-            final label = '${df.format(d)} — ${names.join(', ')}';
-            return DropdownMenuItem<DateTime?>(value: d, child: Text(label));
-          }),
-        ];
-
-        return DropdownButtonFormField<DateTime?>(
-          value: selected,
-          items: items,
-          onChanged: onChanged,
-          decoration: InputDecoration(labelText: hint, border: const OutlineInputBorder()),
-        );
-      },
-    );
-  }
-}
-
-class _TeamTab extends ConsumerWidget {
-  final String? discipline;
-  final ValueChanged<String> onChangeDiscipline;
-  final DateTime? selectedDate;
-  final ValueChanged<DateTime?> onChangeDate;
-  final DateFormat df;
-
-  const _TeamTab({
-    required this.discipline,
-    required this.onChangeDiscipline,
-    required this.selectedDate,
-    required this.onChangeDate,
-    required this.df,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final teamDisc = ref.watch(teamDisciplinesProvider);
-    final teamsAsync = ref.watch(teamsStreamProvider);
-    final matchesAsync = ref.watch(teamMatchesStreamProvider);
-    final table = ref.watch(teamTableProvider(discipline ?? ''));
-
-    final discItems = teamDisc.map((d) => DropdownMenuItem(value: d.name, child: Text(d.name))).toList();
-
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: discItems.isEmpty
-                    ? const Text('Dodaj timske discipline (gore desno • “tune” ikona).')
-                    : DropdownButtonFormField<String>(
-                        value: discipline,
-                        items: discItems,
-                        onChanged: (v) => onChangeDiscipline(v ?? (discipline ?? '')),
-                        decoration: const InputDecoration(labelText: 'Disciplina', border: OutlineInputBorder()),
+      floatingActionButton: eventsAsync.maybeWhen(
+        data: (events) => (events.isEmpty || !canEdit)
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AddResultScreen(
+                        preselectedEventId: _eventId ?? events.first.id,
+                        preselectedDiscipline: _discipline == 'Sve' ? null : _discipline,
                       ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Dodaj rezultat'),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _EventDateFilter(
-                  selected: selectedDate,
-                  onChanged: onChangeDate,
-                  df: df,
-                  hint: 'Datum (event)',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ListView(
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: _StandingsTable(entries: table),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        const Center(
-                          child: Text('Utakmice', style: TextStyle(fontWeight: FontWeight.w600)),
-                        ),
-                        const SizedBox(height: 8),
-                        matchesAsync.when(
-                          loading: () => const Center(child: CircularProgressIndicator()),
-                          error: (e, _) => Center(child: Text('Greška: $e')),
-                          data: (all) {
-                            final teams = teamsAsync.asData?.value ?? const <Team>[];
-                            final mapTeam = {for (var t in teams) t.id: t.name};
+        orElse: () => null,
+      ),
+      body: eventsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Greška s eventima: $e')),
+        data: (events) {
+          if (events.isEmpty) {
+            return const Center(child: Text('Nema evenata — dodaj event prvo.'));
+          }
 
-                            bool sameDay(DateTime a, DateTime b) =>
-                                a.year == b.year && a.month == b.month && a.day == b.day;
+          _eventId ??= events.first.id;
+          _discipline ??= allDisciplines.first; // 'Sve'
 
-                            final list = all.where((m) {
-                              if ((discipline ?? '').isEmpty) return false;
-                              if (m.discipline != discipline) return false;
-                              if (selectedDate == null) return true;
-                              return sameDay(m.date, selectedDate!);
-                            }).toList()
-                              ..sort((a, b) => b.date.compareTo(a.date));
-
-                            if (list.isEmpty) {
-                              return Center(
-                                child: Text(selectedDate == null
-                                    ? 'Nema utakmica.'
-                                    : 'Nema utakmica na datum: ${df.format(selectedDate!)}'),
-                              );
-                            }
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                for (final m in list)
-                                  Card(
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        crossAxisAlignment: CrossAxisAlignment.center,
-                                        children: [
-                                          Icon(m.winner == 0 ? Icons.hourglass_empty : Icons.emoji_events),
-                                          const SizedBox(height: 6),
-                                          Text(
-                                            '${mapTeam[m.teamAId] ?? 'Tim A'}  ${m.scoreA} : ${m.scoreB}  ${mapTeam[m.teamBId] ?? 'Tim B'}',
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            '${df.format(m.date)} • '
-                                            '${m.winner == 0 ? 'Neriješeno' : (m.winner == 1 ? 'Pobjeda: ${mapTeam[m.teamAId] ?? 'Tim A'}' : 'Pobjeda: ${mapTeam[m.teamBId] ?? 'Tim B'}')}',
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(color: Colors.black54),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            );
-                          },
-                        ),
+          // Header filteri + search + gumb "Tablica poretka"
+          final header = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _discipline,
+                      isExpanded: true,
+                      items: [
+                        for (final d in allDisciplines)
+                          DropdownMenuItem(value: d, child: Text(d)),
                       ],
+                      onChanged: (v) => setState(() => _discipline = v),
+                      decoration: const InputDecoration(
+                        labelText: 'Disciplina',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Timski prikaz'),
+                      value: _isTeam,
+                      onChanged: (v) => setState(() => _isTeam = v),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: _isTeam ? 'Pretraži po nazivu tima…' : 'Pretraži po imenu igrača…',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            FocusScope.of(context).unfocus();
+                          },
+                          icon: const Icon(Icons.clear),
+                          tooltip: 'Obriši pretragu',
+                        ),
                 ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => StandingsScreen(
+                          initialDiscipline: _discipline!,
+                          initialIsTeam: _isTeam,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.table_chart),
+                  label: const Text('Tablica poretka'),
+                ),
+              ),
+              const Divider(),
+            ],
+          );
+
+          final body = _isTeam
+              ? _TeamSection(discipline: _discipline!, query: _query)
+              : _IndivSection(discipline: _discipline!, query: _query);
+
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                header,
+                Expanded(child: body),
               ],
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-class _IndividualTab extends ConsumerWidget {
-  final String? discipline;
-  final ValueChanged<String> onChangeDiscipline;
-  final DateTime? selectedDate;
-  final ValueChanged<DateTime?> onChangeDate;
-  final DateFormat df;
-
-  const _IndividualTab({
-    required this.discipline,
-    required this.onChangeDiscipline,
-    required this.selectedDate,
-    required this.onChangeDate,
-    required this.df,
-  });
+class _TeamSection extends ConsumerWidget {
+  final String discipline; // 'Sve' ili konkretna
+  final String query;
+  const _TeamSection({required this.discipline, required this.query});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final indivDisc = ref.watch(individualDisciplinesProvider);
-    final playersAsync = ref.watch(playersStreamProvider);
-    final matchesAsync = ref.watch(individualMatchesStreamProvider);
-    final table = ref.watch(individualTableProvider(discipline ?? ''));
+    final teamsVal = ref.watch(teamsStreamProvider);
+    final matchesVal = ref.watch(standings.teamMatchesStreamProvider);
 
-    final discItems = indivDisc.map((d) => DropdownMenuItem(value: d.name, child: Text(d.name))).toList();
+    final teams = teamsVal.value ?? const <Team>[];
+    final matches = matchesVal.value ?? const <TeamMatch>[];
 
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: discItems.isEmpty
-                    ? const Text('Dodaj individualne discipline (gore desno • “tune” ikona).')
-                    : DropdownButtonFormField<String>(
-                        value: discipline,
-                        items: discItems,
-                        onChanged: (v) => onChangeDiscipline(v ?? (discipline ?? '')),
-                        decoration: const InputDecoration(labelText: 'Disciplina', border: OutlineInputBorder()),
-                      ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _EventDateFilter(
-                  selected: selectedDate,
-                  onChanged: onChangeDate,
-                  df: df,
-                  hint: 'Datum (event)',
-                ),
-              ),
-            ],
+    String teamName(String id) =>
+        (teams.firstWhere(
+          (t) => t.id == id,
+          orElse: () => const Team(id: '-', name: '—', discipline: '—'),
+        )).name;
+
+    final filtered = matches.where((m) {
+      if (discipline != 'Sve' && m.discipline != discipline) return false;
+      if (query.isEmpty) return true;
+      final a = teamName(m.teamAId).toLowerCase();
+      final b = teamName(m.teamBId).toLowerCase();
+      final q = query.toLowerCase();
+      return a.contains(q) || b.contains(q);
+    }).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    final errorText = teamsVal.hasError
+        ? 'Greška s timovima: ${teamsVal.error}'
+        : (matchesVal.hasError ? 'Greška s mečevima (timski): ${matchesVal.error}' : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (errorText != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(errorText, style: const TextStyle(color: Colors.red)),
           ),
-          const SizedBox(height: 12),
+        if (filtered.isEmpty)
+          const Expanded(child: Center(child: Text('Nema mečeva za zadane filtere.')))
+        else
           Expanded(
-            child: ListView(
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: _StandingsTable(entries: table),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: matchesAsync.when(
-                      loading: () => const Center(child: CircularProgressIndicator()),
-                      error: (e, _) => Center(child: Text('Greška: $e')),
-                      data: (all) {
-                        final players = playersAsync.asData?.value ?? const <Player>[];
-                        final mapP = {for (var p in players) p.id: p.name};
-
-                        bool sameDay(DateTime a, DateTime b) =>
-                            a.year == b.year && a.month == b.month && a.day == b.day;
-
-                        final list = all.where((m) {
-                          if ((discipline ?? '').isEmpty) return false;
-                          if (m.discipline != discipline) return false;
-                          if (selectedDate == null) return true;
-                          return sameDay(m.date, selectedDate!);
-                        }).toList()
-                          ..sort((a, b) => b.date.compareTo(a.date));
-
-                        if (list.isEmpty) {
-                          return Center(
-                            child: Text(selectedDate == null
-                                ? 'Nema mečeva.'
-                                : 'Nema mečeva na datum: ${df.format(selectedDate!)}'),
-                          );
-                        }
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            const Center(
-                              child: Text('Mečevi', style: TextStyle(fontWeight: FontWeight.w600)),
-                            ),
-                            const SizedBox(height: 8),
-                            for (final m in list)
-                              Card(
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.center,
-                                    children: [
-                                      Icon(m.winner == 0 ? Icons.hourglass_empty : Icons.emoji_events),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        '${mapP[m.playerAId] ?? 'Igrač A'}  ${m.scoreA} : ${m.scoreB}  ${mapP[m.playerBId] ?? 'Igrač B'}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${df.format(m.date)} • '
-                                        '${m.winner == 0 ? 'Neriješeno' : (m.winner == 1 ? 'Pobjeda: ${mapP[m.playerAId] ?? 'Igrač A'}' : 'Pobjeda: ${mapP[m.playerBId] ?? 'Igrač B'}')}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(color: Colors.black54),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ],
+            child: ListView.builder(
+              itemCount: filtered.length.clamp(0, 1000),
+              itemBuilder: (_, i) {
+                final m = filtered[i];
+                final a = teamName(m.teamAId);
+                final b = teamName(m.teamBId);
+                final date = DateFormat('dd.MM.yyyy. HH:mm').format(m.date);
+                return _MatchCard(
+                  leftName: a,
+                  rightName: b,
+                  scoreA: m.scoreA,
+                  scoreB: m.scoreB,
+                  discipline: m.discipline,
+                  dateLabel: date,
+                );
+              },
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
 
-class _StandingsTable extends StatelessWidget {
-  final List<TableRowEntry> entries;
-  const _StandingsTable({required this.entries});
+class _IndivSection extends ConsumerWidget {
+  final String discipline;
+  final String query;
+  const _IndivSection({required this.discipline, required this.query});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playersVal = ref.watch(playersStreamProvider);
+    final matchesVal = ref.watch(standings.indivMatchesStreamProvider);
+
+    final players = playersVal.value ?? const <Player>[];
+    final matches = matchesVal.value ?? const <IndividualMatch>[];
+
+    String playerName(String id) =>
+        (players.firstWhere(
+          (p) => p.id == id,
+          orElse: () => const Player(id: '-', name: '—', discipline: '—'),
+        )).name;
+
+    final filtered = matches.where((m) {
+      if (discipline != 'Sve' && m.discipline != discipline) return false;
+      if (query.isEmpty) return true;
+      final a = playerName(m.playerAId).toLowerCase();
+      final b = playerName(m.playerBId).toLowerCase();
+      final q = query.toLowerCase();
+      return a.contains(q) || b.contains(q);
+    }).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    final errorText = playersVal.hasError
+        ? 'Greška s igračima: ${playersVal.error}'
+        : (matchesVal.hasError ? 'Greška s mečevima (individualno): ${matchesVal.error}' : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (errorText != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(errorText, style: const TextStyle(color: Colors.red)),
+          ),
+        if (filtered.isEmpty)
+          const Expanded(child: Center(child: Text('Nema mečeva za zadane filtere.')))
+        else
+          Expanded(
+            child: ListView.builder(
+              itemCount: filtered.length.clamp(0, 1000),
+              itemBuilder: (_, i) {
+                final m = filtered[i];
+                final a = playerName(m.playerAId);
+                final b = playerName(m.playerBId);
+                final date = DateFormat('dd.MM.yyyy. HH:mm').format(m.date);
+                return _MatchCard(
+                  leftName: a,
+                  rightName: b,
+                  scoreA: m.scoreA,
+                  scoreB: m.scoreB,
+                  discipline: m.discipline,
+                  dateLabel: date,
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// ---------- UI: Kartica meča ----------
+class _MatchCard extends StatelessWidget {
+  final String leftName;
+  final String rightName;
+  final int scoreA;
+  final int scoreB;
+  final String discipline;
+  final String dateLabel;
+
+  const _MatchCard({
+    required this.leftName,
+    required this.rightName,
+    required this.scoreA,
+    required this.scoreB,
+    required this.discipline,
+    required this.dateLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (entries.isEmpty) return const Text('Nema podataka za tablicu.');
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('#')),
-          DataColumn(label: Text('Naziv')),
-          DataColumn(label: Text('UT')),
-          DataColumn(label: Text('P')),
-          DataColumn(label: Text('N')),
-          DataColumn(label: Text('I')),
-          DataColumn(label: Text('BOD')),
-          DataColumn(label: Text('+')),
-          DataColumn(label: Text('-')),
-          DataColumn(label: Text('DIF')),
-        ],
-        rows: [
-          for (int i = 0; i < entries.length; i++)
-            DataRow(cells: [
-              DataCell(Text('${i + 1}')),
-              DataCell(Text(entries[i].name)),
-              DataCell(Text('${entries[i].played}')),
-              DataCell(Text('${entries[i].wins}')),
-              DataCell(Text('${entries[i].draws}')),
-              DataCell(Text('${entries[i].losses}')),
-              DataCell(Text('${entries[i].points}')),
-              DataCell(Text('${entries[i].goalsFor}')),
-              DataCell(Text('${entries[i].goalsAgainst}')),
-              DataCell(Text('${entries[i].diff}')),
-            ]),
-        ],
+    final theme = Theme.of(context);
+    final isDraw = scoreA == scoreB;
+    final leftWins = scoreA > scoreB;
+    final rightWins = scoreB > scoreA;
+
+    Color badgeColor;
+    if (isDraw) {
+      badgeColor = theme.colorScheme.outlineVariant;
+    } else {
+      badgeColor = theme.colorScheme.primary;
+    }
+
+    final textStyleName = theme.textTheme.titleMedium!;
+    final textStyleScore = theme.textTheme.headlineSmall!.copyWith(fontWeight: FontWeight.w700);
+
+    return Card(
+      elevation: 1.5,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          children: [
+            Text(
+              '$discipline • $dateLabel',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    leftName,
+                    textAlign: TextAlign.center,
+                    style: leftWins
+                        ? textStyleName.copyWith(fontWeight: FontWeight.w700)
+                        : textStyleName,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                SizedBox(
+                  width: 120,
+                  child: Center(
+                    child: Text('$scoreA : $scoreB', style: textStyleScore),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    rightName,
+                    textAlign: TextAlign.center,
+                    style: rightWins
+                        ? textStyleName.copyWith(fontWeight: FontWeight.w700)
+                        : textStyleName,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: badgeColor.withOpacity(isDraw ? 0.25 : 0.15),
+                borderRadius: BorderRadius.circular(100),
+                border: Border.all(color: badgeColor.withOpacity(0.5)),
+              ),
+              child: Text(
+                isDraw
+                    ? 'Neriješeno'
+                    : (leftWins ? 'Pobjednik: $leftName' : 'Pobjednik: $rightName'),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: isDraw ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
-}
-
-class _TeamFab extends ConsumerWidget {
-  final ResultsRepository repo;
-  final String discipline;
-  final DateTime? selectedDate;
-
-  const _TeamFab({required this.repo, required this.discipline, required this.selectedDate});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.add),
-      onSelected: (v) async {
-        if (v == 'team') {
-          final name = await _promptText(context, 'Novi tim', 'Naziv tima');
-          if (name != null && name.trim().isNotEmpty) {
-            repo.addTeam(name.trim(), discipline);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Tim "${name.trim()}" dodan')),
-              );
-            }
-          }
-        } else if (v == 'match') {
-          final teams = await ref.read(teamsStreamProvider.future);
-          final inDisc = teams.where((t) => t.discipline == discipline).toList();
-          if (inDisc.length < 2) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Dodaj barem 2 tima za utakmicu.')),
-              );
-            }
-            return;
-          }
-          final data = await _matchDialog(context, inDisc);
-          if (data != null) {
-            repo.addTeamMatch(
-              discipline: discipline,
-              teamAId: data.$1,
-              teamBId: data.$2,
-              scoreA: data.$3,
-              scoreB: data.$4,
-              date: selectedDate,
-            );
-            if (context.mounted) {
-              final msg = selectedDate == null
-                  ? 'Utakmica dodana'
-                  : 'Utakmica dodana za ${DateFormat('d.MM.yyyy').format(selectedDate!)}';
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-            }
-          }
-        }
-      },
-      itemBuilder: (c) => const [
-        PopupMenuItem(value: 'team', child: Text('Dodaj tim')),
-        PopupMenuItem(value: 'match', child: Text('Dodaj utakmicu')),
-      ],
-    );
-  }
-}
-
-class _IndividualFab extends ConsumerWidget {
-  final ResultsRepository repo;
-  final String discipline;
-  final DateTime? selectedDate;
-
-  const _IndividualFab({required this.repo, required this.discipline, required this.selectedDate});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.add),
-      onSelected: (v) async {
-        if (v == 'player') {
-          final name = await _promptText(context, 'Novi igrač', 'Ime i prezime');
-          if (name != null && name.trim().isNotEmpty) {
-            repo.addPlayer(name.trim(), discipline);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Igrač "${name.trim()}" dodan')),
-              );
-            }
-          }
-        } else if (v == 'match') {
-          final players = await ref.read(playersStreamProvider.future);
-          final inDisc = players.where((p) => p.discipline == discipline).toList();
-          if (inDisc.length < 2) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Dodaj barem 2 igrača za meč.')),
-              );
-            }
-            return;
-          }
-          final data = await _indMatchDialog(context, inDisc);
-          if (data != null) {
-            repo.addIndividualMatch(
-              discipline: discipline,
-              playerAId: data.$1,
-              playerBId: data.$2,
-              scoreA: data.$3,
-              scoreB: data.$4,
-              date: selectedDate,
-            );
-            if (context.mounted) {
-              final msg = selectedDate == null
-                  ? 'Meč dodan'
-                  : 'Meč dodan za ${DateFormat('d.MM.yyyy').format(selectedDate!)}';
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-            }
-          }
-        }
-      },
-      itemBuilder: (c) => const [
-        PopupMenuItem(value: 'player', child: Text('Dodaj igrača')),
-        PopupMenuItem(value: 'match', child: Text('Dodaj meč')),
-      ],
-    );
-  }
-}
-
-Future<String?> _promptText(BuildContext context, String title, String label) async {
-  final ctrl = TextEditingController();
-  return showDialog<String>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogCtx) => AlertDialog(
-      title: Text(title),
-      content: TextField(controller: ctrl, decoration: InputDecoration(labelText: label)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(null),
-          child: const Text('Odustani'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(ctrl.text),
-          child: const Text('Spremi'),
-        ),
-      ],
-    ),
-  );
-}
-
-Future<(String,String,int,int)?> _matchDialog(BuildContext context, List<Team> teams) async {
-  String? aId = teams.first.id;
-  String? bId = teams.length > 1 ? teams[1].id : teams.first.id;
-  final aCtrl = TextEditingController(text: '0');
-  final bCtrl = TextEditingController(text: '0');
-
-  return showDialog<(String,String,int,int)>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogCtx) => AlertDialog(
-      title: const Text('Nova utakmica'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DropdownButtonFormField<String>(
-            value: aId,
-            items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
-            onChanged: (v) => aId = v,
-            decoration: const InputDecoration(labelText: 'Tim A'),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            value: bId,
-            items: teams.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
-            onChanged: (v) => bId = v,
-            decoration: const InputDecoration(labelText: 'Tim B'),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: TextField(controller: aCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rezultat A'))),
-              const SizedBox(width: 8),
-              Expanded(child: TextField(controller: bCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rezultat B'))),
-            ],
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(null),
-          child: const Text('Odustani'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (aId == null || bId == null || aId == bId) return;
-            final sa = int.tryParse(aCtrl.text) ?? 0;
-            final sb = int.tryParse(bCtrl.text) ?? 0;
-            Navigator.of(dialogCtx, rootNavigator: true).pop((aId!, bId!, sa, sb));
-          },
-          child: const Text('Spremi'),
-        ),
-      ],
-    ),
-  );
-}
-
-Future<(String,String,int,int)?> _indMatchDialog(BuildContext context, List<Player> players) async {
-  String? aId = players.first.id;
-  String? bId = players.length > 1 ? players[1].id : players.first.id;
-  final aCtrl = TextEditingController(text: '0');
-  final bCtrl = TextEditingController(text: '0');
-
-  return showDialog<(String,String,int,int)>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogCtx) => AlertDialog(
-      title: const Text('Novi meč'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DropdownButtonFormField<String>(
-            value: aId,
-            items: players.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))).toList(),
-            onChanged: (v) => aId = v,
-            decoration: const InputDecoration(labelText: 'Igrač A'),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            value: bId,
-            items: players.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))).toList(),
-            onChanged: (v) => bId = v,
-            decoration: const InputDecoration(labelText: 'Igrač B'),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: TextField(controller: aCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rezultat A'))),
-              const SizedBox(width: 8),
-              Expanded(child: TextField(controller: bCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Rezultat B'))),
-            ],
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogCtx, rootNavigator: true).pop(null),
-          child: const Text('Odustani'),
-        ),
-        FilledButton(
-          onPressed: () {
-            if (aId == null || bId == null || aId == bId) return;
-            final sa = int.tryParse(aCtrl.text) ?? 0;
-            final sb = int.tryParse(bCtrl.text) ?? 0;
-            Navigator.of(dialogCtx, rootNavigator: true).pop((aId!, bId!, sa, sb));
-          },
-          child: const Text('Spremi'),
-        ),
-      ],
-    ),
-  );
 }
