@@ -97,7 +97,7 @@ class _AuthGateState extends ConsumerState<AuthGate> with SingleTickerProviderSt
     if (pwd.isEmpty) return _snack('Unesi lozinku');
 
     try {
-      await auth.login(email: email, password: pwd);
+      await auth.login(email, pwd);
       if (!mounted) return;
       _finishAuth();
     } catch (e) {

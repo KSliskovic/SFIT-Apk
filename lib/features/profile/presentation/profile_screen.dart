@@ -16,7 +16,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
-    final userAsync = ref.watch(authUserProvider);
+    final userAsync = ref.watch(currentUserProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profil')),

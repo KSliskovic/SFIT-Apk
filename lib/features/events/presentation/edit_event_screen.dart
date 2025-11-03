@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
-import '../application/events_controller.dart';
+import '../data/events_providers.dart';
 import '../domain/event.dart';
-import 'package:sumfit/core/forms/validators.dart';
-import 'package:sumfit/core/ui/notify.dart';
 
 class EditEventScreen extends ConsumerStatefulWidget {
   final EventItem event;
@@ -17,215 +14,147 @@ class EditEventScreen extends ConsumerStatefulWidget {
 
 class _EditEventScreenState extends ConsumerState<EditEventScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _disciplines = TextEditingController();
-  final _location = TextEditingController();
-  final _description = TextEditingController();
-  DateTime? _dateTime;
+  late final TextEditingController _title;
+  late final TextEditingController _location;
+  DateTime? _startAt;
+  DateTime? _endAt;
 
   @override
   void initState() {
     super.initState();
-    final e = widget.event;
-    _name.text = e.name;
-    _disciplines.text = e.disciplines.join(', ');
-    _location.text = e.location ?? '';
-    _description.text = e.description ?? '';
-    _dateTime = e.dateTime;
+    _title = TextEditingController(text: widget.event.title);
+    _location = TextEditingController(text: widget.event.location ?? '');
+    _startAt = widget.event.startAt;
+    _endAt = widget.event.endAt;
   }
 
   @override
   void dispose() {
-    _name.dispose();
-    _disciplines.dispose();
+    _title.dispose();
     _location.dispose();
-    _description.dispose();
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
-    final base = _dateTime ?? DateTime.now();
-    final d = await showDatePicker(
+  Future<void> _pickDate({required bool start}) async {
+    final now = DateTime.now();
+    final init = (start ? _startAt : _endAt) ?? now;
+    final picked = await showDatePicker(
       context: context,
-      initialDate: base,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-      helpText: 'Odaberi datum',
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 3),
+      initialDate: init,
     );
-    if (d == null) return;
+    if (picked == null) return;
     setState(() {
-      _dateTime = DateTime(d.year, d.month, d.day, base.hour, base.minute);
+      if (start) {
+        _startAt = DateTime(picked.year, picked.month, picked.day);
+        if (_endAt != null && _endAt!.isBefore(_startAt!)) _endAt = _startAt;
+      } else {
+        _endAt = DateTime(picked.year, picked.month, picked.day);
+      }
     });
-  }
-
-  Future<void> _pickTime() async {
-    final base = _dateTime ?? DateTime.now();
-    final t = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(base),
-      helpText: 'Odaberi vrijeme',
-    );
-    if (t == null) return;
-    setState(() {
-      _dateTime = DateTime(base.year, base.month, base.day, t.hour, t.minute);
-    });
-  }
-
-  List<String> _parseDisciplines() {
-    return _disciplines.text
-        .split(',')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_dateTime == null) {
-      showError(context, 'Odaberi datum i vrijeme');
-      return;
-    }
-
-    final ctrl = ref.read(eventsControllerProvider.notifier);
-    final item = EventItem(
-      id: widget.event.id,
-      name: _name.text.trim(),
-      dateTime: _dateTime!,
-      disciplines: _parseDisciplines(),
+    final updated = widget.event.copyWith(
+      title: _title.text.trim(),
       location: _location.text.trim().isEmpty ? null : _location.text.trim(),
-      description: _description.text.trim().isEmpty ? null : _description.text.trim(),
+      startAt: _startAt,
+      endAt: _endAt,
     );
-
-    final res = await ctrl.upsert(item);
+    await ref.read(eventsActionsProvider).upsert(updated);
     if (!mounted) return;
-    res.fold(
-      (f) => showError(context, f.message),
-      (_) {
-        showSuccess(context, 'Event spremljen');
-        Navigator.of(context).pop();
-      },
-    );
+    Navigator.of(context).pop('updated');
   }
 
-  Future<void> _delete() async {
-    final ok = await showDialog<bool>(
+  Future<void> _confirmDelete() async {
+    final yes = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (d) => AlertDialog(
         title: const Text('Obriši event'),
-        content: const Text('Jesi siguran da želiš obrisati ovaj event?'),
+        content: Text('Sigurno obrisati "${widget.event.title}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Odustani')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Obriši')),
+          TextButton(onPressed: () => Navigator.of(d).pop(false), child: const Text('Ne')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(d).pop(true),
+            child: const Text('Da, obriši'),
+          ),
         ],
       ),
     );
-    if (ok != true) return;
-
-    final res = await ref.read(eventsControllerProvider.notifier).delete(widget.event.id);
-    if (!mounted) return;
-    res.fold(
-      (f) => showError(context, f.message),
-      (_) {
-        showSuccess(context, 'Event obrisan');
-        Navigator.of(context).pop();
-      },
-    );
+    if (yes == true) {
+      await ref.read(eventsActionsProvider).deleteEvent(widget.event.id!);
+      if (!mounted) return;
+      Navigator.of(context).pop('deleted');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(eventsControllerProvider);
-    final isLoading = state.isLoading;
-
-    final dt = _dateTime;
-    final dtLabel = dt == null
-        ? '—'
-        : DateFormat('dd.MM.yyyy. HH:mm').format(dt);
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Uredi event')),
+      appBar: AppBar(title: const Text('Uredi događaj')),
       body: Form(
         key: _formKey,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             TextFormField(
-              controller: _name,
-              decoration: const InputDecoration(
-                labelText: 'Naziv',
-                border: OutlineInputBorder(),
-              ),
-              validator: (v) => requireText(v, label: 'Naziv'),
-              enabled: !isLoading,
+              controller: _title,
+              decoration: const InputDecoration(labelText: 'Naziv', border: OutlineInputBorder()),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Unesite naziv' : null,
             ),
             const SizedBox(height: 12),
-
+            TextFormField(
+              controller: _location,
+              decoration: const InputDecoration(labelText: 'Lokacija (opcionalno)', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: isLoading ? null : _pickDate,
+                    onPressed: () => _pickDate(start: true),
                     icon: const Icon(Icons.calendar_today),
-                    label: const Text('Datum'),
+                    label: Text(_startAt == null
+                        ? 'Početak'
+                        : '${_startAt!.day}.${_startAt!.month}.${_startAt!.year}.'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: isLoading ? null : _pickTime,
-                    icon: const Icon(Icons.access_time),
-                    label: const Text('Vrijeme'),
+                    onPressed: () => _pickDate(start: false),
+                    icon: const Icon(Icons.calendar_month),
+                    label: Text(_endAt == null
+                        ? 'Kraj (opcionalno)'
+                        : '${_endAt!.day}.${_endAt!.month}.${_endAt!.year}.'),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text('Odabrano: $dtLabel'),
-
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _disciplines,
-              decoration: const InputDecoration(
-                labelText: 'Discipline (odvojene zarezom)',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !isLoading,
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _location,
-              decoration: const InputDecoration(
-                labelText: 'Lokacija',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !isLoading,
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _description,
-              decoration: const InputDecoration(
-                labelText: 'Opis',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 3,
-              enabled: !isLoading,
-            ),
-
             const SizedBox(height: 20),
+
+            // Akcije
             FilledButton.icon(
-              onPressed: isLoading ? null : _save,
-              icon: isLoading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.save),
-              label: Text(isLoading ? 'Spremanje…' : 'Spremi'),
+              onPressed: _save,
+              icon: const Icon(Icons.save),
+              label: const Text('Spremi'),
             ),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: isLoading ? null : _delete,
-              icon: const Icon(Icons.delete),
+            TextButton.icon(
+              onPressed: _confirmDelete,
+              icon: const Icon(Icons.delete_outline),
               label: const Text('Obriši'),
+              style: TextButton.styleFrom(
+                foregroundColor: cs.error,
+              ),
             ),
           ],
         ),

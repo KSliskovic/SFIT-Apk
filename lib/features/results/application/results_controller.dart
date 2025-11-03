@@ -1,73 +1,68 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:sumfit/core/failure.dart';
-import 'package:sumfit/core/result.dart';
-import '../data/results_providers.dart';
+import 'package:sumfit/features/results/data/results_providers.dart';
 import '../data/results_repository.dart';
 
-class ResultsController extends AutoDisposeAsyncNotifier<void> {
-  late ResultsRepository _repo;
+final resultsControllerProvider =
+StateNotifierProvider<ResultsController, AsyncValue<void>>((ref) {
+  final repo = ref.watch(resultsRepositoryProvider);
+  return ResultsController(repo);
+});
 
-  @override
-  Future<void> build() async {
-    _repo = ref.read(resultsRepositoryProvider);
-  }
+class ResultsController extends StateNotifier<AsyncValue<void>> {
+  ResultsController(this._repo) : super(const AsyncData(null));
+  final ResultsRepository _repo;
 
-  Future<Result<void>> addTeamMatch({
+  Future<void> addTeamMatch({
     required String discipline,
     required String teamAId,
     required String teamBId,
     required int scoreA,
     required int scoreB,
-    DateTime? date,
+    required DateTime? date,
+    String? eventId,
   }) async {
     state = const AsyncLoading();
     try {
-      _repo.addTeamMatch(
+      await _repo.addTeamMatch(
         discipline: discipline,
         teamAId: teamAId,
         teamBId: teamBId,
         scoreA: scoreA,
         scoreB: scoreB,
-        date: date,
+        date: date ?? DateTime.now(),
+        eventId: eventId,
       );
       state = const AsyncData(null);
-      return const Success(null);
     } catch (e, st) {
-      final f = mapError(e, st);
-      state = AsyncError(f, st);
-      return Error(f);
+      state = AsyncError(e, st);
+      rethrow;
     }
   }
 
-  Future<Result<void>> addIndividualMatch({
+  Future<void> addIndividualMatch({
     required String discipline,
     required String playerAId,
     required String playerBId,
     required int scoreA,
     required int scoreB,
-    DateTime? date,
+    required DateTime? date,
+    String? eventId,
   }) async {
     state = const AsyncLoading();
     try {
-      _repo.addIndividualMatch(
+      await _repo.addIndividualMatch(
         discipline: discipline,
         playerAId: playerAId,
         playerBId: playerBId,
         scoreA: scoreA,
         scoreB: scoreB,
-        date: date,
+        date: date ?? DateTime.now(),
+        eventId: eventId,
       );
       state = const AsyncData(null);
-      return const Success(null);
     } catch (e, st) {
-      final f = mapError(e, st);
-      state = AsyncError(f, st);
-      return Error(f);
+      state = AsyncError(e, st);
+      rethrow;
     }
   }
 }
-
-final resultsControllerProvider =
-    AutoDisposeAsyncNotifierProvider<ResultsController, void>(() {
-  return ResultsController();
-});

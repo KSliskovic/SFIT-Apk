@@ -1,27 +1,23 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../domain/profile.dart';
 
 class ProfileRepository {
-  static const _key = 'sumfit_profile_v1';
+  final _db = FirebaseFirestore.instance;
 
-  Future<Profile> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    if (raw == null) {
-      // default profil
+  Future<Profile> load(String uid) async {
+    final snap = await _db.collection('users').doc(uid).get();
+    if (!snap.exists) {
       return const Profile(name: '', email: '', role: 'student');
     }
-    return Profile.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    final data = snap.data()!;
+    return Profile.fromJson(data.map((k, v) => MapEntry(k, v)));
   }
 
-  Future<void> save(Profile p) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(p.toJson()));
+  Future<void> save(String uid, Profile p) async {
+    await _db.collection('users').doc(uid).set(p.toJson(), SetOptions(merge: true));
   }
 
-  Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+  Future<void> clear(String uid) async {
+    // po potrebi: await _db.collection('users').doc(uid).delete();
   }
 }

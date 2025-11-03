@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../application/auth_controller.dart';
-import '../data/auth_providers.dart';
 import 'registration_screen.dart';
 
 import 'package:sumfit/core/forms/validators.dart';
@@ -38,17 +38,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (!mounted) return;
     res.fold(
-      (f) => showError(context, f.message),
-      (_) {
+          (f) => showError(context, f.message),
+          (_) {
         showSuccess(context, 'Dobrodošao!');
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop(); // vrati na AuthGate/home
-        } else {
-          // Fallback: ako nema ništa za pop, zamijeni ekran profilom
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const ProfileScreen()),
-          );
-        }
+        // Navigiraj kroz GoRouter umjesto ručnog push-a na ProfileScreen
+        context.go('/events'); // ili '/profile' ako želiš izravno na profil
       },
     );
   }
@@ -97,7 +91,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               onPressed: isLoading ? null : _submit,
               icon: isLoading
                   ? const SizedBox(
-                      width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.login),
               label: Text(isLoading ? 'Prijava…' : 'Prijavi se'),
             ),
@@ -113,11 +107,5 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 }
 
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
-  @override
-  Widget build(BuildContext context) {
-    // Ovo je placeholder; u tvom projektu već postoji prava ProfileScreen
-    return const Scaffold(body: Center(child: Text('Profil')));
-  }
-}
+// ⛔️ Maknuto: ovdje je bio placeholder ProfileScreen koji je uzrokovao konflikt imena.
+// Pravi ProfileScreen živi u features/profile/presentation/profile_screen.dart

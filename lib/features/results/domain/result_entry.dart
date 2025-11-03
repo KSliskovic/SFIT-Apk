@@ -1,19 +1,40 @@
-class ResultEntry {
+// lib/features/results/domain/result_entry.dart
+class TableRowEntry {
   final String id;
-  final String eventId;
-  final String discipline;  // NOVO
-  final String participant;
-  final double value;
-  final String unit;
-  final DateTime createdAt;
+  final String name;
+  final int played;
+  final int wins;
+  final int losses;
+  final int draws;
+  final int points;
 
-  const ResultEntry({
+  const TableRowEntry({
     required this.id,
-    required this.eventId,
-    required this.discipline,
-    required this.participant,
-    required this.value,
-    required this.unit,
-    required this.createdAt,
+    required this.name,
+    required this.played,
+    required this.wins,
+    required this.losses,
+    required this.draws,
+    required this.points,
   });
+
+  TableRowEntry copyWith({
+    String? id,
+    String? name,
+    int? played,
+    int? wins,
+    int? losses,
+    int? draws,
+    int? points,
+  }) {
+    return TableRowEntry(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      played: played ?? this.played,
+      wins: wins ?? this.wins,
+      losses: losses ?? this.losses,
+      draws: draws ?? this.draws,
+      points: points ?? this.points,
+    );
+  }
 }

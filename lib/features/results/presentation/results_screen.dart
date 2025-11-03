@@ -1,3 +1,4 @@
+// lib/features/results/presentation/results_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,7 +9,7 @@ import '../../events/domain/event.dart';
 
 // Results (repo/provideri i add screen)
 import '../data/results_providers.dart'; // teamsStreamProvider / playersStreamProvider
-import '../domain/models.dart';
+import '../domain/models.dart'; // Team, Player, TeamMatch, IndividualMatch
 import 'add_result_screen.dart';
 import 'manage_roster_guard.dart';
 import 'roster_list_screen.dart';
@@ -99,19 +100,19 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         data: (events) => (events.isEmpty || !canEdit)
             ? null
             : FloatingActionButton.extended(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AddResultScreen(
-                        preselectedEventId: _eventId ?? events.first.id,
-                        preselectedDiscipline: _discipline == 'Sve' ? null : _discipline,
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('Dodaj rezultat'),
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AddResultScreen(
+                  preselectedEventId: _eventId ?? events.first.id,
+                  preselectedDiscipline: _discipline == 'Sve' ? null : _discipline,
+                ),
               ),
+            );
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Dodaj rezultat'),
+        ),
         orElse: () => null,
       ),
       body: eventsAsync.when(
@@ -168,13 +169,13 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                   suffixIcon: _query.isEmpty
                       ? null
                       : IconButton(
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            FocusScope.of(context).unfocus();
-                          },
-                          icon: const Icon(Icons.clear),
-                          tooltip: 'Obriši pretragu',
-                        ),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      FocusScope.of(context).unfocus();
+                    },
+                    icon: const Icon(Icons.clear),
+                    tooltip: 'Obriši pretragu',
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -182,11 +183,12 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: () {
+                    final disc = _discipline!;
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => StandingsScreen(
-                          initialDiscipline: _discipline!,
-                          initialIsTeam: _isTeam,
+                          initialDiscipline: disc,
+                          initialTeamsMode: _isTeam,
                         ),
                       ),
                     );
@@ -233,7 +235,7 @@ class _TeamSection extends ConsumerWidget {
 
     String teamName(String id) =>
         (teams.firstWhere(
-          (t) => t.id == id,
+              (t) => t.id == id,
           orElse: () => const Team(id: '-', name: '—', discipline: '—'),
         )).name;
 
@@ -301,7 +303,7 @@ class _IndivSection extends ConsumerWidget {
 
     String playerName(String id) =>
         (players.firstWhere(
-          (p) => p.id == id,
+              (p) => p.id == id,
           orElse: () => const Player(id: '-', name: '—', discipline: '—'),
         )).name;
 
@@ -387,7 +389,8 @@ class _MatchCard extends StatelessWidget {
     }
 
     final textStyleName = theme.textTheme.titleMedium!;
-    final textStyleScore = theme.textTheme.headlineSmall!.copyWith(fontWeight: FontWeight.w700);
+    final textStyleScore =
+    theme.textTheme.headlineSmall!.copyWith(fontWeight: FontWeight.w700);
 
     return Card(
       elevation: 1.5,
@@ -399,7 +402,8 @@ class _MatchCard extends StatelessWidget {
           children: [
             Text(
               '$discipline • $dateLabel',
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.outline),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
@@ -446,7 +450,9 @@ class _MatchCard extends StatelessWidget {
                     ? 'Neriješeno'
                     : (leftWins ? 'Pobjednik: $leftName' : 'Pobjednik: $rightName'),
                 style: theme.textTheme.labelMedium?.copyWith(
-                  color: isDraw ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.primary,
+                  color: isDraw
+                      ? theme.colorScheme.onSurfaceVariant
+                      : theme.colorScheme.primary,
                   fontWeight: FontWeight.w600,
                 ),
               ),

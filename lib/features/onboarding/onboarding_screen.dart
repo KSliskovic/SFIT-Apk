@@ -37,8 +37,6 @@ class OnboardingScreen extends StatelessWidget {
                 onPressed: () => _finish(context),
                 icon: const Icon(Icons.arrow_forward),
                 label: const Text('Kreni'),
-            mkdir -p lib/features/onboarding
-cat > lib/features/onboarding/onboarding_screen.dart <<'EOF'
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';

@@ -1,46 +1,74 @@
-import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class EventItem {
-  final String id;
-  final String name;
-  final DateTime dateTime;
-  final List<String> disciplines;
+  final String? id;
+  final String title;
   final String? location;
+  final DateTime? startAt;
+  final DateTime? endAt;
+  final String ownerUid;
   final String? description;
+  final List<String> disciplines;
 
-  const EventItem({
-    required this.id,
-    required this.name,
-    required this.dateTime,
-    this.disciplines = const [],
+  EventItem({
+    this.id,
+    required this.title,
     this.location,
+    this.startAt,
+    this.endAt,
+    required this.ownerUid,
     this.description,
-  });
+    List<String>? disciplines,
+  }) : disciplines = disciplines ?? const [];
 
-  /// Formatiran prikaz datuma
-  String get dateString {
-    return DateFormat('d. MMMM yyyy. • HH:mm', 'hr').format(dateTime);
+  EventItem copyWith({
+    String? id,
+    String? title,
+    String? location,
+    DateTime? startAt,
+    DateTime? endAt,
+    String? ownerUid,
+    String? description,
+    List<String>? disciplines,
+  }) {
+    return EventItem(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      location: location ?? this.location,
+      startAt: startAt ?? this.startAt,
+      endAt: endAt ?? this.endAt,
+      ownerUid: ownerUid ?? this.ownerUid,
+      description: description ?? this.description,
+      disciplines: disciplines ?? this.disciplines,
+    );
   }
 
-  /// Pretvori u JSON za lokalnu pohranu
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'dateTime': dateTime.toIso8601String(),
-        'disciplines': disciplines,
-        'location': location,
-        'description': description,
-      };
+    'title': title,
+    'location': location,
+    'startAt': startAt,
+    'endAt': endAt,
+    'ownerUid': ownerUid,
+    'description': description,
+    'disciplines': disciplines,
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
 
-  /// Učitaj iz JSON-a
   factory EventItem.fromJson(Map<String, dynamic> json) => EventItem(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        dateTime: DateTime.parse(json['dateTime'] as String),
-        disciplines:
-            (json['disciplines'] as List?)?.map((e) => e.toString()).toList() ??
-                [],
-        location: json['location'] as String?,
-        description: json['description'] as String?,
-      );
+    id: json['id'] as String?,
+    title: json['title'] as String,
+    location: json['location'] as String?,
+    startAt: (json['startAt'] is Timestamp)
+        ? (json['startAt'] as Timestamp).toDate()
+        : json['startAt'] as DateTime?,
+    endAt: (json['endAt'] is Timestamp)
+        ? (json['endAt'] as Timestamp).toDate()
+        : json['endAt'] as DateTime?,
+    ownerUid: json['ownerUid'] as String,
+    description: json['description'] as String?,
+    disciplines: (json['disciplines'] as List?)
+        ?.whereType<String>()
+        .toList() ??
+        const [],
+  );
 }

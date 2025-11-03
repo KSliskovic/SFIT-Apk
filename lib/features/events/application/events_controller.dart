@@ -29,7 +29,7 @@ class EventsController extends AutoDisposeAsyncNotifier<void> {
   Future<Result<void>> delete(String id) async {
     state = const AsyncLoading();
     try {
-      await _repo.delete(id);
+      await _repo.remove(id);
       state = const AsyncData(null);
       return const Success(null);
     } catch (e, st) {

@@ -32,7 +32,7 @@ class AuthController extends AutoDisposeAsyncNotifier<void> {
         indexNo: indexNo,
         organizerCode: organizerCode,
       );
-      ref.invalidate(authUserProvider);
+      ref.invalidate(currentUserProvider);
       state = const AsyncData(null);
       return const Success(null);
     } catch (e, st) {
@@ -49,7 +49,7 @@ class AuthController extends AutoDisposeAsyncNotifier<void> {
     state = const AsyncLoading();
     try {
       await _repo.login(email: email, password: password);
-      ref.invalidate(authUserProvider);
+      ref.invalidate(currentUserProvider);
       state = const AsyncData(null);
       return const Success(null);
     } catch (e, st) {
@@ -62,7 +62,7 @@ class AuthController extends AutoDisposeAsyncNotifier<void> {
   Future<void> logout() async {
     try {
       await _repo.signOut();
-      ref.invalidate(authUserProvider);
+      ref.invalidate(currentUserProvider);
     } catch (_) {}
   }
 }

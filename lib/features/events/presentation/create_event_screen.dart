@@ -1,16 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
-
-import '../application/events_controller.dart';
+import '../../auth/data/auth_providers.dart';
+import '../data/events_providers.dart';
 import '../domain/event.dart';
-import '../../../core/id.dart';
-import 'package:sumfit/core/forms/validators.dart';
-import 'package:sumfit/core/ui/notify.dart';
 
 class CreateEventScreen extends ConsumerStatefulWidget {
-  final EventItem? editing; // ako proslijediš, ponaša se kao "edit"
-  const CreateEventScreen({super.key, this.editing});
+  const CreateEventScreen({super.key});
 
   @override
   ConsumerState<CreateEventScreen> createState() => _CreateEventScreenState();
@@ -19,124 +14,133 @@ class CreateEventScreen extends ConsumerStatefulWidget {
 class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final _name = TextEditingController();
-  final _disciplines = TextEditingController(); // CSV npr. "Nogomet, Košarka"
+  final _title = TextEditingController();
   final _location = TextEditingController();
   final _description = TextEditingController();
+  final _disciplines = TextEditingController(); // "Nogomet, Šah, Tenis"
 
-  DateTime? _dateTime;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.editing;
-    if (e != null) {
-      _name.text = e.name;
-      _disciplines.text = e.disciplines.join(', ');
-      _location.text = e.location ?? '';
-      _description.text = e.description ?? '';
-      _dateTime = e.dateTime;
-    }
-  }
+  DateTime? _startAt;
+  DateTime? _endAt;
 
   @override
   void dispose() {
-    _name.dispose();
-    _disciplines.dispose();
+    _title.dispose();
     _location.dispose();
     _description.dispose();
+    _disciplines.dispose();
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
-    final base = _dateTime ?? DateTime.now();
-    final d = await showDatePicker(
-      context: context,
-      initialDate: base,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-      helpText: 'Odaberi datum',
-    );
-    if (d == null) return;
-    setState(() {
-      _dateTime = DateTime(d.year, d.month, d.day, base.hour, base.minute);
-    });
-  }
+  Future<void> _pickDate({required bool start}) async {
+    final now = DateTime.now();
+    final init = (start ? _startAt : _endAt) ?? now;
 
-  Future<void> _pickTime() async {
-    final base = _dateTime ?? DateTime.now();
-    final t = await showTimePicker(
+    final picked = await showDatePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(base),
-      helpText: 'Odaberi vrijeme',
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 3),
+      initialDate: init,
     );
-    if (t == null) return;
-    setState(() {
-      _dateTime = DateTime(base.year, base.month, base.day, t.hour, t.minute);
-    });
-  }
+    if (picked == null) return;
 
-  List<String> _parseDisciplines() {
-    return _disciplines.text
-        .split(',')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
+    setState(() {
+      if (start) {
+        _startAt = DateTime(picked.year, picked.month, picked.day);
+        if (_endAt != null && _endAt!.isBefore(_startAt!)) _endAt = _startAt;
+      } else {
+        _endAt = DateTime(picked.year, picked.month, picked.day);
+        if (_startAt != null && _endAt!.isBefore(_startAt!)) _endAt = _startAt;
+      }
+    });
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_dateTime == null) {
-      showError(context, 'Odaberi datum i vrijeme');
+
+    final me = ref.read(currentUserProvider).value;
+    if (me == null) {
+      _toast('Niste prijavljeni.');
+      return;
+    }
+    if (_startAt == null) {
+      _toast('Odaberite početni datum.');
       return;
     }
 
-    final ctrl = ref.read(eventsControllerProvider.notifier);
+    // parsiraj discipline iz text fielda
+    final disciplines = _disciplines.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+
     final item = EventItem(
-      id: widget.editing?.id ?? newId('ev'),
-      name: _name.text.trim(),
-      dateTime: _dateTime!,
-      disciplines: _parseDisciplines(),
+      id: null,
+      title: _title.text.trim(),
       location: _location.text.trim().isEmpty ? null : _location.text.trim(),
+      startAt: _startAt!,
+      endAt: _endAt,
+      ownerUid: me.uid,
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
+      disciplines: disciplines, // ✅ novo polje
     );
 
-    final res = await ctrl.upsert(item);
+    await ref.read(eventsActionsProvider).upsert(item);
     if (!mounted) return;
-    res.fold(
-      (f) => showError(context, f.message),
-      (_) {
-        showSuccess(context, widget.editing == null ? 'Event kreiran' : 'Event spremljen');
-        Navigator.of(context).pop();
-      },
+    Navigator.of(context).pop(true); // vrati true da roditelj zna da je spremljeno
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Događaj kreiran')),
     );
+  }
+
+  void _toast(String m) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(eventsControllerProvider);
-    final isLoading = state.isLoading;
-
-    final dt = _dateTime;
-    final dtLabel = dt == null
-        ? '—'
-        : DateFormat('dd.MM.yyyy. HH:mm').format(dt);
-
     return Scaffold(
-      appBar: AppBar(title: Text(widget.editing == null ? 'Novi event' : 'Uredi event')),
+      appBar: AppBar(title: const Text('Novi događaj')),
       body: Form(
         key: _formKey,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             TextFormField(
-              controller: _name,
+              controller: _title,
               decoration: const InputDecoration(
                 labelText: 'Naziv',
                 border: OutlineInputBorder(),
               ),
-              validator: (v) => requireText(v, label: 'Naziv'),
-              enabled: !isLoading,
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Unesite naziv' : null,
+            ),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _location,
+              decoration: const InputDecoration(
+                labelText: 'Lokacija (opcionalno)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _description,
+              decoration: const InputDecoration(
+                labelText: 'Opis (opcionalno)',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
+            ),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _disciplines,
+              decoration: const InputDecoration(
+                labelText: 'Discipline (odvojene zarezom: npr. Nogomet, Šah, Tenis)',
+                border: OutlineInputBorder(),
+              ),
             ),
             const SizedBox(height: 12),
 
@@ -144,62 +148,35 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: isLoading ? null : _pickDate,
+                    onPressed: () => _pickDate(start: true),
                     icon: const Icon(Icons.calendar_today),
-                    label: const Text('Datum'),
+                    label: Text(
+                      _startAt == null
+                          ? 'Početak'
+                          : '${_startAt!.day}.${_startAt!.month}.${_startAt!.year}.',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: isLoading ? null : _pickTime,
-                    icon: const Icon(Icons.access_time),
-                    label: const Text('Vrijeme'),
+                    onPressed: () => _pickDate(start: false),
+                    icon: const Icon(Icons.calendar_month),
+                    label: Text(
+                      _endAt == null
+                          ? 'Kraj (opcionalno)'
+                          : '${_endAt!.day}.${_endAt!.month}.${_endAt!.year}.',
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text('Odabrano: $dtLabel'),
-
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _disciplines,
-              decoration: const InputDecoration(
-                labelText: 'Discipline (odvojene zarezom)',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !isLoading,
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _location,
-              decoration: const InputDecoration(
-                labelText: 'Lokacija',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !isLoading,
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _description,
-              decoration: const InputDecoration(
-                labelText: 'Opis',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 3,
-              enabled: !isLoading,
-            ),
 
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: isLoading ? null : _save,
-              icon: isLoading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.save),
-              label: Text(isLoading ? 'Spremanje…' : 'Spremi'),
+              onPressed: _save,
+              icon: const Icon(Icons.save),
+              label: const Text('Spremi'),
             ),
           ],
         ),

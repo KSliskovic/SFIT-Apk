@@ -1,17 +1,20 @@
+// lib/features/results/presentation/standings_screen.dart
+import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/disciplines.dart';
+
 import '../domain/models.dart';
-import '../data/standings_providers.dart';
+import '../data/standings_providers.dart' as standings;
+import '../data/disciplines.dart';
 
 class StandingsScreen extends ConsumerStatefulWidget {
-  final String initialDiscipline; // npr. 'Sve' ili 'Nogomet'
-  final bool initialIsTeam;       // true = timski, false = individualni
+  final String initialDiscipline; // npr. "Sve" ili "Košarka"
+  final bool initialTeamsMode;    // false = individual, true = timovi
 
   const StandingsScreen({
     super.key,
     required this.initialDiscipline,
-    required this.initialIsTeam,
+    this.initialTeamsMode = false,
   });
 
   @override
@@ -20,156 +23,160 @@ class StandingsScreen extends ConsumerStatefulWidget {
 
 class _StandingsScreenState extends ConsumerState<StandingsScreen> {
   late String _discipline;
-  late bool _isTeam;
-
-  // sort state
-  int _sortColumnIndex = 5; // default Pts
-  bool _sortAsc = false;    // veći bodovi gore
+  late bool _teamsMode;
 
   @override
   void initState() {
     super.initState();
     _discipline = widget.initialDiscipline;
-    _isTeam = widget.initialIsTeam;
+    _teamsMode = widget.initialTeamsMode;
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final allDisciplines = ref.watch(allDisciplinesWithAllProvider);
 
-    final rows = _isTeam
-        ? ref.watch(teamTableProvider(_discipline))
-        : ref.watch(indivTableProvider(_discipline));
+    // Dinamički dohvat poretka prema filterima
+    final rowsAV = _teamsMode
+        ? ref.watch(standings.teamStandingsProvider(_discipline))
+        : ref.watch(standings.individualStandingsProvider(_discipline));
 
-    // primijeni sortiranje
-    final data = [...rows];
-    int cmpNum(int a, int b) => _sortAsc ? a.compareTo(b) : b.compareTo(a);
-    switch (_sortColumnIndex) {
-      case 2: data.sort((a,b)=>cmpNum(a.played, b.played)); break; // P
-      case 3: data.sort((a,b)=>cmpNum(a.wins, b.wins));     break; // W
-      case 4: data.sort((a,b)=>cmpNum(a.losses, b.losses)); break; // L
-      case 5: data.sort((a,b)=>cmpNum(a.points, b.points)); break; // Pts
-      default: data.sort((a,b)=>_sortAsc ? a.name.compareTo(b.name) : b.name.compareTo(a.name)); // Naziv
-    }
+    final title =
+        'Tablica poretka • ${_teamsMode ? 'Timovi' : 'Individual'} • $_discipline';
 
-    void setSort(int idx, bool asc) {
-      setState(() {
-        _sortColumnIndex = idx;
-        _sortAsc = asc;
-      });
-    }
+    final textNum = theme.textTheme.bodyMedium?.copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tablica poretka'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    Widget header() {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Row(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _discipline,
-                    isExpanded: true,
-                    items: [for (final d in allDisciplines) DropdownMenuItem(value: d, child: Text(d))],
-                    onChanged: (v) => setState(() => _discipline = v!),
-                    decoration: const InputDecoration(
-                      labelText: 'Disciplina',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Timski prikaz'),
-                    value: _isTeam,
-                    onChanged: (v) => setState(() => _isTeam = v),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
             Expanded(
-              child: _StandingsTableMinimal(
-                rows: data,
-                sortColumnIndex: _sortColumnIndex,
-                sortAsc: _sortAsc,
-                onSortChanged: setSort,
+              flex: 3,
+              child: DropdownButtonFormField<String>(
+                value: _discipline,
+                isExpanded: true,
+                items: [
+                  for (final d in allDisciplines)
+                    DropdownMenuItem(value: d, child: Text(d)),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _discipline = v);
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Disciplina',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: const Text('Timski prikaz'),
+                value: _teamsMode,
+                onChanged: (v) => setState(() => _teamsMode = v),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _StandingsTableMinimal extends StatelessWidget {
-  final List<TableRowEntry> rows;
-  final int sortColumnIndex;
-  final bool sortAsc;
-  final void Function(int index, bool asc) onSortChanged;
-
-  const _StandingsTableMinimal({
-    required this.rows,
-    required this.sortColumnIndex,
-    required this.sortAsc,
-    required this.onSortChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (rows.isEmpty) {
-      return const Center(child: Text('Nema podataka za prikaz.'));
+      );
     }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        sortColumnIndex: sortColumnIndex,
-        sortAscending: sortAsc,
-        headingRowHeight: 48,
-        dataRowMinHeight: 44,
-        columns: [
-          const DataColumn(label: Text('#')),
-          DataColumn(
-            label: const Text('Naziv'),
-            onSort: (i, asc) => onSortChanged(i, asc),
-          ),
-          DataColumn(
-            label: const Text('P'),
-            numeric: true,
-            onSort: (i, asc) => onSortChanged(i, asc),
-          ),
-          DataColumn(
-            label: const Text('W'),
-            numeric: true,
-            onSort: (i, asc) => onSortChanged(i, asc),
-          ),
-          DataColumn(
-            label: const Text('L'),
-            numeric: true,
-            onSort: (i, asc) => onSortChanged(i, asc),
-          ),
-          DataColumn(
-            label: const Text('Pts'),
-            numeric: true,
-            onSort: (i, asc) => onSortChanged(i, asc),
-          ),
+
+    DataTable buildTable(List<TableRowEntry> rows) {
+      return DataTable(
+        headingTextStyle: theme.textTheme.labelLarge,
+        dataTextStyle: theme.textTheme.bodyMedium,
+        headingRowHeight: 44,
+        dataRowMinHeight: 40,
+        dataRowMaxHeight: 44,
+        columnSpacing: 20,
+        showBottomBorder: true,
+        columns: const [
+          DataColumn(label: Text('#')),
+          DataColumn(label: Text('Ime')),
+          DataColumn(label: Text('Uta.'), numeric: true),
+          DataColumn(label: Text('Pob.'), numeric: true),
+          DataColumn(label: Text('Ner.'), numeric: true),
+          DataColumn(label: Text('Por.'), numeric: true),
+          DataColumn(label: Text('GF'), numeric: true),
+          DataColumn(label: Text('GA'), numeric: true),
+          DataColumn(label: Text('+/-'), numeric: true),
+          DataColumn(label: Text('Bod.'), numeric: true),
         ],
         rows: [
           for (int i = 0; i < rows.length; i++)
-            DataRow(cells: [
-              DataCell(Text('${i + 1}')),
-              DataCell(Text(rows[i].name)),
-              DataCell(Text('${rows[i].played}')),
-              DataCell(Text('${rows[i].wins}')),
-              DataCell(Text('${rows[i].losses}')),
-              DataCell(Text('${rows[i].points}')),
-            ]),
+            DataRow(
+              cells: [
+                DataCell(Text('${i + 1}', style: textNum)),
+                DataCell(Text(rows[i].name, overflow: TextOverflow.ellipsis)),
+                DataCell(Text('${rows[i].played}', style: textNum)),
+                DataCell(Text('${rows[i].wins}', style: textNum)),
+                DataCell(Text('${rows[i].draws}', style: textNum)),
+                DataCell(Text('${rows[i].losses}', style: textNum)),
+                DataCell(Text('${rows[i].goalsFor}', style: textNum)),
+                DataCell(Text('${rows[i].goalsAgainst}', style: textNum)),
+                DataCell(Text('${rows[i].diff}', style: textNum)),
+                DataCell(Text('${rows[i].points}', style: textNum)),
+              ],
+            ),
+        ],
+      );
+    }
+
+    Widget tableContainer(Widget child) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 720),
+                  child: Scrollbar(
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.vertical,
+                      child: child,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: Column(
+        children: [
+          header(),
+          Expanded(
+            child: rowsAV.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('Greška: $e')),
+              data: (rows) => rows.isEmpty
+                  ? const Center(child: Text('Nema podataka za prikaz.'))
+                  : tableContainer(buildTable(rows)),
+            ),
+          ),
         ],
       ),
     );

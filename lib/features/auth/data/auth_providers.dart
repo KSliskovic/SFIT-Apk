@@ -1,25 +1,20 @@
+// lib/features/auth/data/auth_providers.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/auth_user.dart';
 import 'auth_repository.dart';
-import 'users_repository.dart';
 
-final usersRepositoryProvider = Provider<UsersRepository>((ref) => UsersRepository());
+final authRepositoryProvider = Provider<AuthRepository>((ref) => AuthRepository());
 
-final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => AuthRepository(ref.watch(usersRepositoryProvider)),
-);
-
-/// Trenutni korisnik (učitava se iz SharedPreferences)
-final authUserProvider = FutureProvider<AuthUser?>((ref) async {
-  final repo = ref.watch(authRepositoryProvider);
-  return repo.getCurrentUser();
+final authStateProvider = StreamProvider<AuthUser?>((ref) {
+  return ref.read(authRepositoryProvider).watchAuthState();
 });
 
-/// (Alias, ako negdje koristiš currentUserProvider)
-final currentUserProvider = authUserProvider;
+final currentUserProvider = FutureProvider<AuthUser?>((ref) {
+  return ref.read(authRepositoryProvider).getCurrentUser();
+});
 
 final authActionsProvider = Provider<AuthActions>((ref) {
-  final repo = ref.watch(authRepositoryProvider);
+  final repo = ref.read(authRepositoryProvider);
   return AuthActions(ref, repo);
 });
 
@@ -27,11 +22,6 @@ class AuthActions {
   final Ref ref;
   final AuthRepository repo;
   AuthActions(this.ref, this.repo);
-
-  Future<void> signOut() async {
-    await repo.signOut();
-    ref.invalidate(authUserProvider);
-  }
 
   Future<void> register({
     required String name,
@@ -51,11 +41,18 @@ class AuthActions {
       indexNo: indexNo,
       organizerCode: organizerCode,
     );
-    ref.invalidate(authUserProvider);
+    ref.invalidate(currentUserProvider);
   }
 
-  Future<void> login({required String email, required String password}) async {
+  Future<void> login(String email, String password) async {
     await repo.login(email: email, password: password);
-    ref.invalidate(authUserProvider);
+    ref.invalidate(currentUserProvider);
+  }
+
+  Future<void> signOut() async {
+    await repo.signOut();
+    ref
+      ..invalidate(currentUserProvider)
+      ..invalidate(authStateProvider);
   }
 }

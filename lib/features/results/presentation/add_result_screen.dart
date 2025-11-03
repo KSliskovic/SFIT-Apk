@@ -1,3 +1,4 @@
+// lib/features/results/presentation/add_result_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -15,6 +16,7 @@ import 'manage_roster_guard.dart';
 
 // Discipline (centralni izvor)
 import '../data/disciplines.dart';
+import '../application/results_controller.dart';
 
 // Permissions (role-based)
 import '../../../core/auth/permissions.dart';
@@ -98,28 +100,26 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
         if (_teamA == null || _teamB == null) { setState(() => _saving = false); return showError(context, 'Odaberi oba tima'); }
         if (_teamA == _teamB) { setState(() => _saving = false); return showError(context, 'Tim A i Tim B moraju biti različiti'); }
 
-        final res = await ctrl.addTeamMatch(
+        await ctrl.addTeamMatch(
           discipline: _discipline!, teamAId: _teamA!, teamBId: _teamB!,
-          scoreA: scoreA, scoreB: scoreB, date: _date,
+          scoreA: scoreA, scoreB: scoreB, date: _date, eventId: _eventId, // 🔹 proslijedi eventId
         );
         if (!mounted) return;
-        res.fold(
-          (f) { setState(() => _saving = false); showError(context, f.message); },
-          (_) { showSuccess(context, 'Rezultat (tim) spremljen'); Navigator.of(context).pop(); },
-        );
+        setState(() => _saving = false);
+        showSuccess(context, 'Rezultat (tim) spremljen');
+        Navigator.of(context).pop();
       } else {
         if (_playerA == null || _playerB == null) { setState(() => _saving = false); return showError(context, 'Odaberi oba igrača'); }
         if (_playerA == _playerB) { setState(() => _saving = false); return showError(context, 'Igrač A i Igrač B moraju biti različiti'); }
 
-        final res = await ctrl.addIndividualMatch(
+        await ctrl.addIndividualMatch(
           discipline: _discipline!, playerAId: _playerA!, playerBId: _playerB!,
-          scoreA: scoreA, scoreB: scoreB, date: _date,
+          scoreA: scoreA, scoreB: scoreB, date: _date, eventId: _eventId, // 🔹 proslijedi eventId
         );
         if (!mounted) return;
-        res.fold(
-          (f) { setState(() => _saving = false); showError(context, f.message); },
-          (_) { showSuccess(context, 'Rezultat (individualni) spremljen'); Navigator.of(context).pop(); },
-        );
+        setState(() => _saving = false);
+        showSuccess(context, 'Rezultat (individualni) spremljen');
+        Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) { setState(() => _saving = false); showError(context, e.toString()); }
@@ -128,7 +128,6 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // RBAC: studenti ne mogu uopće vidjeti formu
     final canEdit = ref.watch(canEditProvider);
     if (!canEdit) {
       return Scaffold(
@@ -136,10 +135,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(24.0),
-            child: Text(
-              'Samo organizatori mogu dodavati rezultate.',
-              textAlign: TextAlign.center,
-            ),
+            child: Text('Samo organizatori mogu dodavati rezultate.', textAlign: TextAlign.center),
           ),
         ),
       );
@@ -149,7 +145,6 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
     final playersAsync = ref.watch(playersStreamProvider);
     final teamsAsync = ref.watch(teamsStreamProvider);
 
-    // Centralne discipline (bez "Sve"!)
     final disciplines = ref.watch(allDisciplinesProvider);
 
     return Scaffold(
@@ -171,8 +166,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Greška s eventima: $e')),
         data: (events) {
-          // ----- SIGURNO POSTAVLJANJE DEFAULT VRIJEDNOSTI -----
-          // EVENT
+          // Event default
           if (events.isNotEmpty) {
             final ids = events.map((e) => e.id).toSet();
             final candidate = widget.preselectedEventId ?? _eventId ?? events.first.id;
@@ -181,7 +175,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
             _eventId = null;
           }
 
-          // DISCIPLINE
+          // Discipline default
           if (disciplines.isNotEmpty) {
             final ds = disciplines.toSet();
             final candidate = widget.preselectedDiscipline ?? _discipline ?? disciplines.first;
@@ -189,44 +183,36 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
           } else {
             _discipline = null;
           }
-          // -----------------------------------------------------
 
-          final dtLabel = _date == null
-              ? '—'
-              : DateFormat('dd.MM.yyyy. HH:mm').format(_date!);
+          final dtLabel = _date == null ? '—' : DateFormat('dd.MM.yyyy. HH:mm').format(_date!);
 
           return Form(
             key: _formKey,
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // EVENT DROPDOWN ili prazno stanje
                 if (events.isEmpty)
                   const _EmptyBlock(message: 'Nema evenata — dodaj event prvo.')
                 else
                   DropdownButtonFormField<String>(
-                    value: _eventId, // SIGURNO: vrijednost je u items
+                    value: _eventId,
                     isExpanded: true,
                     items: [
                       for (final e in events)
-                        DropdownMenuItem(value: e.id, child: Text(e.name)),
+                        DropdownMenuItem(value: e.id, child: Text(e.title)), // 🔹 title
                     ],
                     onChanged: (v) => setState(() => _eventId = v),
                     decoration: const InputDecoration(labelText: 'Event', border: OutlineInputBorder()),
                   ),
                 const SizedBox(height: 12),
 
-                // DISCIPLINA DROPDOWN ili prazno stanje
                 if (disciplines.isEmpty)
                   const _EmptyBlock(message: 'Nema disciplina — dodaj barem jednu disciplinu.')
                 else
                   DropdownButtonFormField<String>(
-                    value: _discipline, // SIGURNO: vrijednost je u items
+                    value: _discipline,
                     isExpanded: true,
-                    items: [
-                      for (final d in disciplines)
-                        DropdownMenuItem(value: d, child: Text(d)),
-                    ],
+                    items: [for (final d in disciplines) DropdownMenuItem(value: d, child: Text(d))],
                     onChanged: (v) => setState(() => _discipline = v),
                     decoration: const InputDecoration(labelText: 'Disciplina', border: OutlineInputBorder()),
                   ),
@@ -242,9 +228,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: Text('Odabrano: $dtLabel', maxLines: 2, overflow: TextOverflow.ellipsis),
-                    ),
+                    Expanded(child: Text('Odabrano: $dtLabel', maxLines: 2, overflow: TextOverflow.ellipsis)),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -263,10 +247,9 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                     data: (teams) {
                       if (teams.isEmpty) return const _EmptyBlock(message: 'Nema timova — dodaj ih (ikona gore desno).');
 
-                      // SIGURNO postavljanje vrijednosti dropdowna
                       final teamIds = teams.map((t) => t.id).toSet();
-                      _teamA = ( _teamA != null && teamIds.contains(_teamA) ) ? _teamA : teams.first.id;
-                      _teamB = ( _teamB != null && teamIds.contains(_teamB) )
+                      _teamA = (_teamA != null && teamIds.contains(_teamA)) ? _teamA : teams.first.id;
+                      _teamB = (_teamB != null && teamIds.contains(_teamB))
                           ? _teamB
                           : (teams.length > 1 ? teams[1].id : teams.first.id);
 
@@ -278,7 +261,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                                 child: DropdownButtonFormField<String>(
                                   value: _teamA,
                                   isExpanded: true,
-                                  items: [ for (final t in teams) DropdownMenuItem(value: t.id, child: Text(t.name)) ],
+                                  items: [for (final t in teams) DropdownMenuItem(value: t.id, child: Text(t.name))],
                                   onChanged: (v) => setState(() => _teamA = v),
                                   decoration: const InputDecoration(labelText: 'Tim A', border: OutlineInputBorder()),
                                 ),
@@ -288,7 +271,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                                 child: DropdownButtonFormField<String>(
                                   value: _teamB,
                                   isExpanded: true,
-                                  items: [ for (final t in teams) DropdownMenuItem(value: t.id, child: Text(t.name)) ],
+                                  items: [for (final t in teams) DropdownMenuItem(value: t.id, child: Text(t.name))],
                                   onChanged: (v) => setState(() => _teamB = v),
                                   decoration: const InputDecoration(labelText: 'Tim B', border: OutlineInputBorder()),
                                 ),
@@ -326,10 +309,9 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                     data: (players) {
                       if (players.isEmpty) return const _EmptyBlock(message: 'Nema igrača — dodaj ih (ikona gore desno).');
 
-                      // SIGURNO postavljanje vrijednosti dropdowna
                       final playerIds = players.map((p) => p.id).toSet();
-                      _playerA = ( _playerA != null && playerIds.contains(_playerA) ) ? _playerA : players.first.id;
-                      _playerB = ( _playerB != null && playerIds.contains(_playerB) )
+                      _playerA = (_playerA != null && playerIds.contains(_playerA)) ? _playerA : players.first.id;
+                      _playerB = (_playerB != null && playerIds.contains(_playerB))
                           ? _playerB
                           : (players.length > 1 ? players[1].id : players.first.id);
 
@@ -341,7 +323,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                                 child: DropdownButtonFormField<String>(
                                   value: _playerA,
                                   isExpanded: true,
-                                  items: [ for (final p in players) DropdownMenuItem(value: p.id, child: Text(p.name)) ],
+                                  items: [for (final p in players) DropdownMenuItem(value: p.id, child: Text(p.name))],
                                   onChanged: (v) => setState(() => _playerA = v),
                                   decoration: const InputDecoration(labelText: 'Igrač A', border: OutlineInputBorder()),
                                 ),
@@ -351,7 +333,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                                 child: DropdownButtonFormField<String>(
                                   value: _playerB,
                                   isExpanded: true,
-                                  items: [ for (final p in players) DropdownMenuItem(value: p.id, child: Text(p.name)) ],
+                                  items: [for (final p in players) DropdownMenuItem(value: p.id, child: Text(p.name))],
                                   onChanged: (v) => setState(() => _playerB = v),
                                   decoration: const InputDecoration(labelText: 'Igrač B', border: OutlineInputBorder()),
                                 ),

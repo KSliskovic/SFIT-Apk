@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "909055223147",
+    "project_id": "sumfit-app-20251101165453",
+    "storage_bucket": "sumfit-app-20251101165453.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:909055223147:android:8e23b7dfe2d506eaeb582e",
+        "android_client_info": {
+          "package_name": "com.example.sumfit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBwR_cuG2Qq4DezbGrj9qJC1Q1bC92aaA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -8,7 +8,6 @@ final disciplineRepositoryProvider =
 final disciplinesStreamProvider = StreamProvider<List<Discipline>>((ref) {
   final repo = ref.watch(disciplineRepositoryProvider);
   // seediraj defaultne ako je prazno (asinkrono, ne blokira stream)
-  repo.seedIfEmpty();
   return repo.watchAll();
 });
 

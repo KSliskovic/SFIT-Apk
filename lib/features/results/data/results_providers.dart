@@ -58,3 +58,14 @@ final teamsFilteredProvider =
     return list.where((t) => t.discipline == discipline).toList();
   });
 });
+// lib/features/results/data/results_providers.dart  (DODAJ ispod postojećeg)
+
+final teamsMapProvider = Provider<AsyncValue<Map<String, Team>>>((ref) {
+  final list = ref.watch(teamsStreamProvider);
+  return list.whenData((ts) => { for (final t in ts) t.id: t });
+});
+
+final playersMapProvider = Provider<AsyncValue<Map<String, Player>>>((ref) {
+  final list = ref.watch(playersStreamProvider);
+  return list.whenData((ps) => { for (final p in ps) p.id: p });
+});
