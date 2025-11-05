@@ -17,7 +17,20 @@ import '../data/discipline_providers.dart';
 class AddResultScreen extends ConsumerStatefulWidget {
   final String? preselectedEventId;
   final String? preselectedDiscipline;
-  const AddResultScreen({super.key, this.preselectedEventId, this.preselectedDiscipline});
+
+  // EDIT podrška
+  final TeamMatch? existingTeamMatch;
+  final IndividualMatch? existingIndividualMatch;
+  final bool isEdit;
+
+  const AddResultScreen({
+    super.key,
+    this.preselectedEventId,
+    this.preselectedDiscipline,
+    this.existingTeamMatch,
+    this.existingIndividualMatch,
+    this.isEdit = false,
+  });
 
   @override
   ConsumerState<AddResultScreen> createState() => _AddResultScreenState();
@@ -37,6 +50,32 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
   final _scoreB = TextEditingController();
   DateTime? _date;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Prefill ako je EDIT
+    final tm = widget.existingTeamMatch;
+    final im = widget.existingIndividualMatch;
+
+    if (tm != null) {
+      _disciplineName = tm.discipline;
+      _teamA = tm.teamAId;
+      _teamB = tm.teamBId;
+      _scoreA.text = tm.scoreA.toString();
+      _scoreB.text = tm.scoreB.toString();
+      _date = tm.date;
+      _eventId = tm.eventId ?? widget.preselectedEventId;
+    } else if (im != null) {
+      _disciplineName = im.discipline;
+      _playerA = im.playerAId;
+      _playerB = im.playerBId;
+      _scoreA.text = im.scoreA.toString();
+      _scoreB.text = im.scoreB.toString();
+      _date = im.date;
+      _eventId = im.eventId ?? widget.preselectedEventId;
+    }
+  }
 
   @override
   void dispose() {
@@ -75,6 +114,8 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
     return int.tryParse(v.trim()) == null ? 'Unesi cijeli broj' : null;
   }
 
+  int _winner(int a, int b) => a == b ? 0 : (a > b ? 1 : 2);
+
   Future<void> _save(bool isTeam) async {
     if (!_formKey.currentState!.validate()) return;
     if (_eventId == null) return showError(context, 'Odaberi event');
@@ -85,6 +126,57 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
     try {
       final scoreA = int.parse(_scoreA.text.trim());
       final scoreB = int.parse(_scoreB.text.trim());
+
+      // EDIT grane
+      if (widget.isEdit && (widget.existingTeamMatch != null || widget.existingIndividualMatch != null)) {
+        final repo = ref.read(resultsRepositoryProvider);
+
+        if (isTeam) {
+          if (_teamA == null || _teamB == null) { setState(() => _saving = false); return showError(context, 'Odaberi oba tima'); }
+          if (_teamA == _teamB) { setState(() => _saving = false); return showError(context, 'Tim A i Tim B moraju biti različiti'); }
+
+          final original = widget.existingTeamMatch!;
+          final updated = TeamMatch(
+            id: original.id,
+            discipline: _disciplineName!,
+            teamAId: _teamA!,
+            teamBId: _teamB!,
+            scoreA: scoreA,
+            scoreB: scoreB,
+            date: _date!,
+            winner: _winner(scoreA, scoreB),
+            eventId: _eventId,
+          );
+          await repo.updateTeamMatch(updated);
+          if (!mounted) return;
+          setState(() => _saving = false);
+          Navigator.of(context).pop('updated');
+          return;
+        } else {
+          if (_playerA == null || _playerB == null) { setState(() => _saving = false); return showError(context, 'Odaberi oba igrača'); }
+          if (_playerA == _playerB) { setState(() => _saving = false); return showError(context, 'Igrač A i Igrač B moraju biti različiti'); }
+
+          final original = widget.existingIndividualMatch!;
+          final updated = IndividualMatch(
+            id: original.id,
+            discipline: _disciplineName!,
+            playerAId: _playerA!,
+            playerBId: _playerB!,
+            scoreA: scoreA,
+            scoreB: scoreB,
+            date: _date!,
+            winner: _winner(scoreA, scoreB),
+            eventId: _eventId,
+          );
+          await repo.updateIndividualMatch(updated);
+          if (!mounted) return;
+          setState(() => _saving = false);
+          Navigator.of(context).pop('updated');
+          return;
+        }
+      }
+
+      // ADD grane (postojeći flow)
       final ctrl = ref.read(resultsControllerProvider.notifier);
 
       if (isTeam) {
@@ -97,8 +189,7 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
         );
         if (!mounted) return;
         setState(() => _saving = false);
-        showSuccess(context, 'Rezultat (tim) spremljen');
-        Navigator.of(context).pop();
+        Navigator.of(context).pop('created');
       } else {
         if (_playerA == null || _playerB == null) { setState(() => _saving = false); return showError(context, 'Odaberi oba igrača'); }
         if (_playerA == _playerB) { setState(() => _saving = false); return showError(context, 'Igrač A i Igrač B moraju biti različiti'); }
@@ -109,30 +200,58 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
         );
         if (!mounted) return;
         setState(() => _saving = false);
-        showSuccess(context, 'Rezultat (individualni) spremljen');
-        Navigator.of(context).pop();
+        Navigator.of(context).pop('created');
       }
     } catch (e) {
       if (mounted) { setState(() => _saving = false); showError(context, e.toString()); }
     }
   }
 
+  Future<void> _confirmDelete() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: const Text('Obriši rezultat'),
+        content: Text(widget.existingTeamMatch != null
+            ? 'Sigurno obrisati meč timova?'
+            : 'Sigurno obrisati individualni meč?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(d).pop(false), child: const Text('Ne')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(d).pop(true),
+            child: const Text('Da, obriši'),
+          ),
+        ],
+      ),
+    );
+    if (yes == true) {
+      final repo = ref.read(resultsRepositoryProvider);
+      if (widget.existingTeamMatch != null) {
+        await repo.deleteTeamMatch(widget.existingTeamMatch!.id);
+      } else if (widget.existingIndividualMatch != null) {
+        await repo.deleteIndividualMatch(widget.existingIndividualMatch!.id);
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop('deleted');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Guard po ulozi: koristi isti mehanizam kao prije, ili ga uključi kroz parent
-    // (Ako želiš, može i ManageRosterGuard ovdje, ali ostavljam kao što je bilo.)
     final eventsAsync = ref.watch(eventsStreamProvider);
-
-    // NOVO: dohvat disciplina iz centralnog izvora
     final discsAV = ref.watch(disciplinesStreamProvider);
-
-    // Roster
     final playersAsync = ref.watch(playersStreamProvider);
     final teamsAsync = ref.watch(teamsStreamProvider);
 
+    final isEditing = widget.isEdit || widget.existingTeamMatch != null || widget.existingIndividualMatch != null;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Dodaj rezultat'),
+        title: Text(isEditing ? 'Uredi rezultat' : 'Dodaj rezultat'),
         actions: [
           IconButton(
             tooltip: 'Dodaj tim/igrača',
@@ -152,8 +271,10 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
           // Event default
           if (events.isNotEmpty) {
             final ids = events.map((e) => e.id).toSet();
-            final candidate = widget.preselectedEventId ?? _eventId ?? events.first.id;
-            _eventId = ids.contains(candidate) ? candidate : events.first.id;
+            final preferred = _eventId ??
+                widget.preselectedEventId ??
+                (events.isNotEmpty ? events.first.id : null);
+            _eventId = (preferred != null && ids.contains(preferred)) ? preferred : events.first.id;
           } else {
             _eventId = null;
           }
@@ -166,11 +287,11 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                 return const _EmptyBlock(message: 'Nema disciplina — dodaj barem jednu disciplinu.');
               }
 
-              // Discipline default (po imenu jer modeli zasad koriste string)
+              // Discipline default
               final names = discs.map((d) => d.name).toList(growable: false);
               if (names.isNotEmpty) {
                 final ds = names.toSet();
-                final candidate = widget.preselectedDiscipline ?? _disciplineName ?? names.first;
+                final candidate = _disciplineName ?? widget.preselectedDiscipline ?? names.first;
                 _disciplineName = ds.contains(candidate) ? candidate : names.first;
               } else {
                 _disciplineName = null;
@@ -189,14 +310,14 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                   .where((p) => _disciplineName == null ? false : p.discipline == _disciplineName)
                   .toList();
 
-              // pripremi default izbore (A/B) kad se promijeni disciplina
+              // pripremi default izbore (A/B)
               if (isTeam) {
                 if (teams.isNotEmpty) {
                   final ids = teams.map((t) => t.id).toList();
-                  _teamA = (ids.contains(_teamA)) ? _teamA : ids.first;
+                  _teamA = (ids.contains(_teamA)) ? _teamA : (widget.existingTeamMatch?.teamAId ?? ids.first);
                   _teamB = (ids.contains(_teamB))
                       ? _teamB
-                      : (ids.length > 1 ? ids[1] : ids.first);
+                      : (widget.existingTeamMatch?.teamBId ?? (ids.length > 1 ? ids[1] : ids.first));
                 } else {
                   _teamA = null;
                   _teamB = null;
@@ -204,10 +325,10 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
               } else {
                 if (players.isNotEmpty) {
                   final ids = players.map((p) => p.id).toList();
-                  _playerA = (ids.contains(_playerA)) ? _playerA : ids.first;
+                  _playerA = (ids.contains(_playerA)) ? _playerA : (widget.existingIndividualMatch?.playerAId ?? ids.first);
                   _playerB = (ids.contains(_playerB))
                       ? _playerB
-                      : (ids.length > 1 ? ids[1] : ids.first);
+                      : (widget.existingIndividualMatch?.playerBId ?? (ids.length > 1 ? ids[1] : ids.first));
                 } else {
                   _playerA = null;
                   _playerB = null;
@@ -240,7 +361,6 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                       items: [for (final n in names) DropdownMenuItem(value: n, child: Text(n))],
                       onChanged: (v) => setState(() {
                         _disciplineName = v;
-                        // reset izbora na promjeni discipline
                         _teamA = _teamB = _playerA = _playerB = null;
                       }),
                       decoration: const InputDecoration(labelText: 'Disciplina', border: OutlineInputBorder()),
@@ -383,8 +503,19 @@ class _AddResultScreenState extends ConsumerState<AddResultScreen> {
                       icon: _saving
                           ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2))
                           : const Icon(Icons.save),
-                      label: Text(_saving ? 'Spremanje…' : 'Spremi'),
+                      label: Text(_saving ? 'Spremanje…' : (isEditing ? 'Spremi izmjene' : 'Spremi')),
                     ),
+                    if (isEditing) ...[
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: _confirmDelete,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Obriši'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               );

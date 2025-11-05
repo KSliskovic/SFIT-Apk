@@ -40,6 +40,9 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  // edit mode
+  bool _editMode = false;
+
   @override
   void initState() {
     super.initState();
@@ -67,6 +70,12 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
       appBar: AppBar(
         title: const Text('Rezultati'),
         actions: [
+          if (canEdit)
+            IconButton(
+              tooltip: _editMode ? 'Zatvori uređivanje' : 'Uredi rezultate',
+              onPressed: () => setState(() => _editMode = !_editMode),
+              icon: Icon(_editMode ? Icons.close : Icons.edit),
+            ),
           if (canEdit)
             IconButton(
               tooltip: 'Discipline',
@@ -171,7 +180,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // ✅ nema više "Timski prikaz" switcha (auto po disciplini)
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -229,8 +237,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
                 );
               } else {
                 body = isTeam
-                    ? _TeamSection(discipline: _discipline!, query: _query)
-                    : _IndivSection(discipline: _discipline!, query: _query);
+                    ? _TeamSection(discipline: _discipline!, query: _query, editMode: _editMode)
+                    : _IndivSection(discipline: _discipline!, query: _query, editMode: _editMode);
               }
 
               return Padding(
@@ -253,7 +261,8 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
 class _TeamSection extends ConsumerWidget {
   final String discipline; // konkretna
   final String query;
-  const _TeamSection({required this.discipline, required this.query});
+  final bool editMode;
+  const _TeamSection({required this.discipline, required this.query, required this.editMode});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -309,6 +318,24 @@ class _TeamSection extends ConsumerWidget {
                   scoreB: m.scoreB,
                   discipline: m.discipline,
                   dateLabel: date,
+                  trailing: editMode
+                      ? IconButton(
+                          tooltip: 'Uredi',
+                          icon: const Icon(Icons.edit),
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => AddResultScreen(
+                                  preselectedEventId: m.eventId,
+                                  preselectedDiscipline: m.discipline,
+                                  existingTeamMatch: m,
+                                  isEdit: true,
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : null,
                 );
               },
             ),
@@ -321,7 +348,8 @@ class _TeamSection extends ConsumerWidget {
 class _IndivSection extends ConsumerWidget {
   final String discipline;
   final String query;
-  const _IndivSection({required this.discipline, required this.query});
+  final bool editMode;
+  const _IndivSection({required this.discipline, required this.query, required this.editMode});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -377,6 +405,24 @@ class _IndivSection extends ConsumerWidget {
                   scoreB: m.scoreB,
                   discipline: m.discipline,
                   dateLabel: date,
+                  trailing: editMode
+                      ? IconButton(
+                          tooltip: 'Uredi',
+                          icon: const Icon(Icons.edit),
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => AddResultScreen(
+                                  preselectedEventId: m.eventId,
+                                  preselectedDiscipline: m.discipline,
+                                  existingIndividualMatch: m,
+                                  isEdit: true,
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : null,
                 );
               },
             ),
@@ -394,6 +440,7 @@ class _MatchCard extends StatelessWidget {
   final int scoreB;
   final String discipline;
   final String dateLabel;
+  final Widget? trailing;
 
   const _MatchCard({
     required this.leftName,
@@ -402,6 +449,7 @@ class _MatchCard extends StatelessWidget {
     required this.scoreB,
     required this.discipline,
     required this.dateLabel,
+    this.trailing,
   });
 
   @override
@@ -430,11 +478,18 @@ class _MatchCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Column(
           children: [
-            Text(
-              '$discipline • $dateLabel',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.outline),
-              textAlign: TextAlign.center,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '$discipline • $dateLabel',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline),
+                    textAlign: TextAlign.left,
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
             ),
             const SizedBox(height: 8),
             Row(

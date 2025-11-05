@@ -1,4 +1,3 @@
-// lib/features/results/data/results_repository.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../domain/models.dart';
 
@@ -53,7 +52,7 @@ class ResultsRepository {
     await _playersCol.doc(id).delete();
   }
 
-  // --- Rezultati
+  // --- Rezultati (CREATE)
   Future<void> addTeamMatch({
     required String discipline,
     required String teamAId,
@@ -96,6 +95,24 @@ class ResultsRepository {
       'winner': winner,
       if (eventId != null) 'eventId': eventId,
     });
+  }
+
+  // --- Rezultati (UPDATE)
+  Future<void> updateTeamMatch(TeamMatch m) async {
+    await _teamMatchesCol.doc(m.id).update(m.toJson());
+  }
+
+  Future<void> updateIndividualMatch(IndividualMatch m) async {
+    await _individualMatchesCol.doc(m.id).update(m.toJson());
+  }
+
+  // --- Rezultati (DELETE)
+  Future<void> deleteTeamMatch(String id) async {
+    await _teamMatchesCol.doc(id).delete();
+  }
+
+  Future<void> deleteIndividualMatch(String id) async {
+    await _individualMatchesCol.doc(id).delete();
   }
 
   // --- Tablice (placeholder)

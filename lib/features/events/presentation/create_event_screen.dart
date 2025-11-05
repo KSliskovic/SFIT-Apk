@@ -17,7 +17,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
   final _title = TextEditingController();
   final _location = TextEditingController();
   final _description = TextEditingController();
-  final _disciplines = TextEditingController(); // "Nogomet, Šah, Tenis"
+
 
   DateTime? _startAt;
   DateTime? _endAt;
@@ -27,7 +27,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
     _title.dispose();
     _location.dispose();
     _description.dispose();
-    _disciplines.dispose();
+
     super.dispose();
   }
 
@@ -67,12 +67,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
       return;
     }
 
-    // parsiraj discipline iz text fielda
-    final disciplines = _disciplines.text
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+
 
     final item = EventItem(
       id: null,
@@ -82,7 +77,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
       endAt: _endAt,
       ownerUid: me.uid,
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
-      disciplines: disciplines, // ✅ novo polje
+
     );
 
     await ref.read(eventsActionsProvider).upsert(item);
@@ -135,14 +130,6 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
             ),
             const SizedBox(height: 12),
 
-            TextFormField(
-              controller: _disciplines,
-              decoration: const InputDecoration(
-                labelText: 'Discipline (odvojene zarezom: npr. Nogomet, Šah, Tenis)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
 
             Row(
               children: [
