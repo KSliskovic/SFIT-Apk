@@ -1,4 +1,3 @@
-// lib/features/results/presentation/results_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -15,14 +14,17 @@ import 'manage_roster_guard.dart';
 import 'roster_list_screen.dart';
 import 'standings_screen.dart';
 
-// Discipline (centralni izvor)
-import '../data/disciplines.dart';
+// Discipline (centralni izvor + helperi)
+import '../data/discipline_providers.dart';   // <-- koristi stream svih disciplina + isTeam helper
 
 // Shared standings provideri — alias da izbjegnemo sudar imena
 import '../data/standings_providers.dart' as standings;
 
 // Permissions (role-based)
 import '../../../core/auth/permissions.dart';
+
+// (opcija) ulaz za CRUD disciplina iz AppBara
+import 'manage_disciplines_screen.dart';
 
 class ResultsScreen extends ConsumerStatefulWidget {
   const ResultsScreen({super.key});
@@ -34,7 +36,6 @@ class ResultsScreen extends ConsumerStatefulWidget {
 class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   String? _eventId;
   String? _discipline; // 'Sve' ili konkretna
-  bool _isTeam = false; // false = individualni, true = timski
 
   final _searchCtrl = TextEditingController();
   String _query = '';
@@ -57,13 +58,25 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   @override
   Widget build(BuildContext context) {
     final eventsAsync = ref.watch(eventsStreamProvider);
-    final allDisciplines = ref.watch(allDisciplinesWithAllProvider);
     final canEdit = ref.watch(canEditProvider);
+
+    // Puni dropdown iz Firestore kolekcije: disciplines
+    final discsAV = ref.watch(disciplinesStreamProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Rezultati'),
         actions: [
+          if (canEdit)
+            IconButton(
+              tooltip: 'Discipline',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ManageDisciplinesScreen()),
+                );
+              },
+              icon: const Icon(Icons.category),
+            ),
           if (canEdit)
             IconButton(
               tooltip: 'Vidi timove',
@@ -100,19 +113,19 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
         data: (events) => (events.isEmpty || !canEdit)
             ? null
             : FloatingActionButton.extended(
-          onPressed: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AddResultScreen(
-                  preselectedEventId: _eventId ?? events.first.id,
-                  preselectedDiscipline: _discipline == 'Sve' ? null : _discipline,
-                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AddResultScreen(
+                        preselectedEventId: _eventId ?? events.first.id,
+                        preselectedDiscipline: (_discipline == null || _discipline == 'Sve') ? null : _discipline,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Dodaj rezultat'),
               ),
-            );
-          },
-          icon: const Icon(Icons.add),
-          label: const Text('Dodaj rezultat'),
-        ),
         orElse: () => null,
       ),
       body: eventsAsync.when(
@@ -122,97 +135,114 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
           if (events.isEmpty) {
             return const Center(child: Text('Nema evenata — dodaj event prvo.'));
           }
-
           _eventId ??= events.first.id;
-          _discipline ??= allDisciplines.first; // 'Sve'
 
-          // Header filteri + search + gumb "Tablica poretka"
-          final header = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          return discsAV.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('Greška s disciplinama: $e')),
+            data: (discs) {
+              // Dropdown lista imena: 'Sve' + iz kolekcije
+              final disciplineNames = <String>['Sve', ...discs.map((d) => d.name)];
+              _discipline ??= disciplineNames.first; // default 'Sve'
+
+              final isAllSelected = _discipline == 'Sve';
+              // odredi je li timsko iz odabrane discipline (ako nije 'Sve')
+              final isTeam = ref.watch(disciplineIsTeamByNameProvider(isAllSelected ? null : _discipline)) ?? false;
+
+              // Header: dropdown + search + standings
+              final header = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _discipline,
-                      isExpanded: true,
-                      items: [
-                        for (final d in allDisciplines)
-                          DropdownMenuItem(value: d, child: Text(d)),
-                      ],
-                      onChanged: (v) => setState(() => _discipline = v),
-                      decoration: const InputDecoration(
-                        labelText: 'Disciplina',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Timski prikaz'),
-                      value: _isTeam,
-                      onChanged: (v) => setState(() => _isTeam = v),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _searchCtrl,
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  hintText: _isTeam ? 'Pretraži po nazivu tima…' : 'Pretraži po imenu igrača…',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      FocusScope.of(context).unfocus();
-                    },
-                    icon: const Icon(Icons.clear),
-                    tooltip: 'Obriši pretragu',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () {
-                    final disc = _discipline!;
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => StandingsScreen(
-                          initialDiscipline: disc,
-                          initialTeamsMode: _isTeam,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _discipline,
+                          isExpanded: true,
+                          items: [
+                            for (final name in disciplineNames)
+                              DropdownMenuItem(value: name, child: Text(name)),
+                          ],
+                          onChanged: (v) => setState(() => _discipline = v),
+                          decoration: const InputDecoration(
+                            labelText: 'Disciplina',
+                            border: OutlineInputBorder(),
+                          ),
                         ),
                       ),
-                    );
-                  },
-                  icon: const Icon(Icons.table_chart),
-                  label: const Text('Tablica poretka'),
+                      const SizedBox(width: 12),
+                      // ✅ nema više "Timski prikaz" switcha (auto po disciplini)
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _searchCtrl,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: isAllSelected
+                          ? 'Pretraži…'
+                          : (isTeam ? 'Pretraži po nazivu tima…' : 'Pretraži po imenu igrača…'),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                FocusScope.of(context).unfocus();
+                              },
+                              icon: const Icon(Icons.clear),
+                              tooltip: 'Obriši pretragu',
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: isAllSelected
+                          ? null
+                          : () {
+                              final disc = _discipline!;
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => StandingsScreen(
+                                    initialDiscipline: disc,
+                                    initialTeamsMode: isTeam, // iz discipline
+                                  ),
+                                ),
+                              );
+                            },
+                      icon: const Icon(Icons.table_chart),
+                      label: const Text('Tablica poretka'),
+                    ),
+                  ),
+                  const Divider(),
+                ],
+              );
+
+              // Body
+              Widget body;
+              if (isAllSelected) {
+                body = const Center(
+                  child: Text('Odaberi konkretnu disciplinu za prikaz mečeva.'),
+                );
+              } else {
+                body = isTeam
+                    ? _TeamSection(discipline: _discipline!, query: _query)
+                    : _IndivSection(discipline: _discipline!, query: _query);
+              }
+
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    header,
+                    Expanded(child: body),
+                  ],
                 ),
-              ),
-              const Divider(),
-            ],
-          );
-
-          final body = _isTeam
-              ? _TeamSection(discipline: _discipline!, query: _query)
-              : _IndivSection(discipline: _discipline!, query: _query);
-
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                header,
-                Expanded(child: body),
-              ],
-            ),
+              );
+            },
           );
         },
       ),
@@ -221,7 +251,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
 }
 
 class _TeamSection extends ConsumerWidget {
-  final String discipline; // 'Sve' ili konkretna
+  final String discipline; // konkretna
   final String query;
   const _TeamSection({required this.discipline, required this.query});
 
@@ -235,12 +265,12 @@ class _TeamSection extends ConsumerWidget {
 
     String teamName(String id) =>
         (teams.firstWhere(
-              (t) => t.id == id,
+          (t) => t.id == id,
           orElse: () => const Team(id: '-', name: '—', discipline: '—'),
         )).name;
 
     final filtered = matches.where((m) {
-      if (discipline != 'Sve' && m.discipline != discipline) return false;
+      if (m.discipline != discipline) return false;
       if (query.isEmpty) return true;
       final a = teamName(m.teamAId).toLowerCase();
       final b = teamName(m.teamBId).toLowerCase();
@@ -303,12 +333,12 @@ class _IndivSection extends ConsumerWidget {
 
     String playerName(String id) =>
         (players.firstWhere(
-              (p) => p.id == id,
+          (p) => p.id == id,
           orElse: () => const Player(id: '-', name: '—', discipline: '—'),
         )).name;
 
     final filtered = matches.where((m) {
-      if (discipline != 'Sve' && m.discipline != discipline) return false;
+      if (m.discipline != discipline) return false;
       if (query.isEmpty) return true;
       final a = playerName(m.playerAId).toLowerCase();
       final b = playerName(m.playerBId).toLowerCase();
@@ -390,7 +420,7 @@ class _MatchCard extends StatelessWidget {
 
     final textStyleName = theme.textTheme.titleMedium!;
     final textStyleScore =
-    theme.textTheme.headlineSmall!.copyWith(fontWeight: FontWeight.w700);
+        theme.textTheme.headlineSmall!.copyWith(fontWeight: FontWeight.w700);
 
     return Card(
       elevation: 1.5,

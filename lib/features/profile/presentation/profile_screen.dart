@@ -113,20 +113,6 @@ class _LoggedInView extends ConsumerWidget {
           leading: const Icon(Icons.info_outline),
           title: Text('Uloga: ${user.role}'),
         ),
-        if (isOrganizer) ...[
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.admin_panel_settings),
-            title: const Text('Organizer Hub'),
-            subtitle: const Text('Članovi i Timovi (pregled/uređivanje/brisanje)'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const OrganizerHubScreen(),
-              ));
-            },
-          ),
-        ],
         const Divider(),
         ListTile(
           leading: const Icon(Icons.logout),
