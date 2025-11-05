@@ -6,10 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models.dart';
 import '../data/standings_providers.dart' as standings;
 import '../data/disciplines.dart';
+import '../data/discipline_providers.dart'; // ⬅️ za disciplineIsTeamByNameProvider
 
 class StandingsScreen extends ConsumerStatefulWidget {
   final String initialDiscipline; // npr. "Sve" ili "Košarka"
-  final bool initialTeamsMode;    // false = individual, true = timovi
+  final bool initialTeamsMode;    // DEPRECATED: više se ne koristi, ostavljeno radi kompatibilnosti
 
   const StandingsScreen({
     super.key,
@@ -23,13 +24,11 @@ class StandingsScreen extends ConsumerStatefulWidget {
 
 class _StandingsScreenState extends ConsumerState<StandingsScreen> {
   late String _discipline;
-  late bool _teamsMode;
 
   @override
   void initState() {
     super.initState();
     _discipline = widget.initialDiscipline;
-    _teamsMode = widget.initialTeamsMode;
   }
 
   @override
@@ -37,13 +36,15 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> {
     final theme = Theme.of(context);
     final allDisciplines = ref.watch(allDisciplinesWithAllProvider);
 
-    // Dinamički dohvat poretka prema filterima
-    final rowsAV = _teamsMode
+    // Automatski odredi je li disciplina timska ili individualna
+    final isTeam = ref.watch(disciplineIsTeamByNameProvider(_discipline)) ?? false;
+
+    // Dinamički dohvat poretka prema odabranoj disciplini
+    final rowsAV = isTeam
         ? ref.watch(standings.teamStandingsProvider(_discipline))
         : ref.watch(standings.individualStandingsProvider(_discipline));
 
-    final title =
-        'Tablica poretka • ${_teamsMode ? 'Timovi' : 'Individual'} • $_discipline';
+    final title = 'Tablica poretka • ${isTeam ? 'Timovi' : 'Individual'} • $_discipline';
 
     final textNum = theme.textTheme.bodyMedium?.copyWith(
       fontFeatures: const [FontFeature.tabularFigures()],
@@ -55,7 +56,6 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> {
         child: Row(
           children: [
             Expanded(
-              flex: 3,
               child: DropdownButtonFormField<String>(
                 value: _discipline,
                 isExpanded: true,
@@ -72,17 +72,6 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> {
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: const Text('Timski prikaz'),
-                value: _teamsMode,
-                onChanged: (v) => setState(() => _teamsMode = v),
               ),
             ),
           ],
